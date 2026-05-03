@@ -1,0 +1,133 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #18181b;
+  background: #f7f2ea;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #f7f2ea; }
+button, input, textarea, select { font: inherit; }
+.app { min-height: 100vh; display: flex; }
+.sidebar { width: 280px; min-height: 100vh; background: #0b0b10; color: white; padding: 22px; position: sticky; top: 0; }
+.brand { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
+.brandIcon { width: 48px; height: 48px; border-radius: 18px; background: #f2b84b; color: #111; display: grid; place-items: center; font-weight: 1000; font-size: 24px; }
+.brand b { display: block; font-size: 19px; }
+.brand span { display: block; color: #a1a1aa; font-size: 12px; margin-top: 2px; }
+.sidebar nav { display: grid; gap: 8px; }
+.sidebar nav button { border: 0; border-radius: 16px; background: transparent; color: #d4d4d8; text-align: left; padding: 13px 14px; font-weight: 750; cursor: pointer; transition: .18s; }
+.sidebar nav button:hover { background: #18181b; color: white; }
+.sidebar nav button.active { background: white; color: #111; }
+.safeBox { margin-top: 26px; border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.06); border-radius: 24px; padding: 16px; }
+.safeBox b { color: #f6cf77; }
+.safeBox p { color: #a1a1aa; font-size: 12px; line-height: 1.55; margin: 8px 0 0; }
+main { flex: 1; min-width: 0; }
+.content { max-width: 1240px; margin: 0 auto; padding: 30px; }
+.header { margin-bottom: 20px; display: flex; justify-content: space-between; gap: 16px; }
+.eyebrow { margin: 0 0 6px; color: #b7791f; font-weight: 800; font-size: 14px; }
+h1 { margin: 0; font-size: clamp(30px, 5vw, 46px); letter-spacing: -1.5px; line-height: 1; }
+h2 { margin: 0; font-size: 22px; letter-spacing: -.4px; }
+h3 { margin: 0; font-size: 18px; }
+p { color: #71717a; line-height: 1.5; }
+.notice { border: 1px solid #f0c46b; background: #fff6dd; color: #6b470a; padding: 14px 16px; border-radius: 22px; margin-bottom: 20px; font-size: 14px; line-height: 1.5; }
+.card { background: white; border: 1px solid #e6e0d5; border-radius: 28px; padding: 22px; box-shadow: 0 10px 30px rgba(20, 16, 9, .05); }
+.grid { display: grid; gap: 20px; }
+.grid.two { grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); }
+.grid.three { grid-template-columns: 340px minmax(0, 1fr); }
+.wide { grid-column: span 1; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+.stat p { margin: 0; font-size: 14px; }
+.stat strong { display: block; font-size: 36px; margin: 8px 0 2px; letter-spacing: -1px; }
+.stat span { color: #a1a1aa; font-size: 12px; }
+.page { display: grid; gap: 20px; }
+.sectionHead { display: flex; justify-content: space-between; gap: 14px; align-items: start; margin-bottom: 18px; }
+.sectionHead p { margin: 5px 0 0; }
+.btn { border: 0; border-radius: 16px; padding: 11px 16px; cursor: pointer; font-weight: 850; transition: .18s; }
+.btn.dark { background: #0b0b10; color: white; }
+.btn.dark:hover { background: #27272a; }
+.btn.light { background: #f3f0ea; color: #18181b; }
+.btn.gold { background: #f2b84b; color: #18181b; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.checkGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.check { background: #f8f7f4; border-radius: 18px; padding: 14px; font-weight: 700; font-size: 14px; color: #3f3f46; }
+.funnel { background: #0b0b10; color: white; }
+.funnel p { color: #d4d4d8; }
+.step { display: flex; align-items: center; gap: 10px; margin-top: 13px; color: #f4f4f5; font-weight: 750; }
+.step span { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 999px; background: #f2b84b; color: #111; font-weight: 1000; }
+.cardsList { display: grid; gap: 12px; margin-top: 16px; }
+.row, .lead, .template { border: 1px solid #eee8de; border-radius: 22px; padding: 16px; display: flex; gap: 16px; justify-content: space-between; align-items: flex-start; }
+.row p, .lead p { margin: 4px 0; font-size: 14px; }
+em { font-style: normal; background: #f8f3e9; color: #93630e; border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 850; white-space: nowrap; }
+.form { display: grid; gap: 12px; margin-top: 16px; }
+.input { width: 100%; border: 1px solid #ddd6ca; background: white; border-radius: 17px; padding: 12px 14px; outline: none; color: #18181b; }
+.input:focus { border-color: #f2b84b; box-shadow: 0 0 0 4px rgba(242, 184, 75, .18); }
+.textarea { min-height: 130px; resize: vertical; }
+.leadControls { min-width: 230px; display: grid; gap: 10px; }
+.hint { background: #fff6dd; color: #6b470a; border-radius: 18px; padding: 14px; line-height: 1.5; }
+.tileGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 16px; }
+.tile { border: 1px solid #eee8de; border-radius: 24px; padding: 18px; display: grid; gap: 8px; }
+.tile strong { display: block; }
+.template { display: block; }
+.template > div { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.template p { margin-bottom: 0; }
+.center { text-align: center; max-width: 620px; margin: 0 auto; }
+.clientForm { max-width: 720px; margin: 0 auto; }
+.barRow { margin-top: 16px; display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+.barRow span { font-weight: 700; }
+.barRow > div { grid-column: 1 / -1; height: 12px; background: #f3f0ea; border-radius: 999px; overflow: hidden; }
+.barRow i { display: block; height: 100%; background: #f2b84b; border-radius: 999px; }
+.photoBox { aspect-ratio: 4 / 5; background: #f3f0ea; border-radius: 24px; overflow: hidden; display: grid; place-items: center; color: #a1a1aa; font-weight: 800; margin-top: 16px; }
+.photoBox img { width: 100%; height: 100%; object-fit: cover; }
+.upload { margin-top: 12px; display: flex; justify-content: center; cursor: pointer; background: #f3f0ea; border-radius: 17px; padding: 12px; font-weight: 850; }
+.upload input { display: none; }
+.twoCols { grid-template-columns: repeat(2, 1fr); }
+.mobileTabs { display: none; }
+@media (max-width: 980px) {
+  .app { display: block; }
+  .sidebar { display: none; }
+  .mobileTabs { display: flex; gap: 8px; overflow-x: auto; padding: 12px; background: rgba(255,255,255,.88); border-bottom: 1px solid #e6e0d5; position: sticky; top: 0; z-index: 5; backdrop-filter: blur(10px); }
+  .mobileTabs button { border: 0; border-radius: 999px; padding: 10px 14px; background: #f3f0ea; font-weight: 850; white-space: nowrap; }
+  .mobileTabs button.active { background: #0b0b10; color: white; }
+  .content { padding: 18px; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .grid.two, .grid.three { grid-template-columns: 1fr; }
+  .checkGrid, .tileGrid, .twoCols { grid-template-columns: 1fr; }
+  .sectionHead { flex-direction: column; }
+  .row, .lead { flex-direction: column; }
+  .leadControls { min-width: 0; width: 100%; }
+}
+
+
+.notice a { color: #18181b; font-weight: 900; margin-left: 8px; text-decoration: underline; }
+.publicPage { min-height: 100vh; background: #f7f2ea; padding: 28px 18px; }
+.publicWrap { max-width: 1180px; margin: 0 auto; }
+.publicTop { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-bottom: 18px; }
+.publicBrand { display: flex; align-items: center; gap: 12px; }
+.publicBrand b { display: block; font-size: 18px; }
+.publicBrand span { display: block; color: #71717a; font-size: 13px; margin-top: 2px; }
+.adminLink { background: white; color: #18181b; text-decoration: none; padding: 11px 16px; border-radius: 999px; font-weight: 900; box-shadow: 0 8px 22px rgba(20,16,9,.06); }
+.publicHero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(360px, .95fr); gap: 22px; align-items: stretch; }
+.heroCard { position: relative; overflow: hidden; background: #0b0b10; color: white; border-radius: 34px; padding: clamp(28px, 5vw, 48px); box-shadow: 0 24px 60px rgba(20,16,9,.16); }
+.heroCard::after { content: ''; position: absolute; right: -120px; top: -110px; width: 340px; height: 340px; border-radius: 999px; background: rgba(242,184,75,.25); filter: blur(35px); }
+.badge { position: relative; z-index: 1; display: inline-flex; background: #f2b84b; color: #18181b; border-radius: 999px; padding: 10px 14px; font-size: 12px; font-weight: 1000; text-transform: uppercase; letter-spacing: .5px; }
+.heroCard h1 { position: relative; z-index: 1; color: white; margin-top: 26px; max-width: 720px; font-size: clamp(40px, 7vw, 68px); line-height: .98; }
+.heroCard p { position: relative; z-index: 1; max-width: 650px; color: #d4d4d8; font-size: 18px; line-height: 1.65; }
+.heroGrid { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(2,1fr); gap: 14px; margin-top: 30px; }
+.heroGrid div { border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.06); border-radius: 22px; padding: 18px; }
+.heroGrid b { display: block; color: white; margin-bottom: 4px; }
+.heroGrid span { color: #a1a1aa; font-size: 14px; }
+.publicFormCard { padding: 28px; }
+.publicFormCard p { margin-top: 8px; }
+.guestNotice { margin-top: 18px; border: 1px solid #f0c46b; background: #fff6dd; color: #6b470a; padding: 15px; border-radius: 22px; font-size: 14px; line-height: 1.6; }
+.publicFormCard .btn { width: 100%; padding: 14px 18px; font-size: 16px; }
+.successBox { min-height: 540px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.successIcon { width: 80px; height: 80px; border-radius: 28px; background: #dcfce7; color: #15803d; display: grid; place-items: center; font-size: 42px; font-weight: 1000; }
+.successBox p { max-width: 420px; }
+.publicInfo { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-top: 22px; }
+.publicInfo .card { padding: 22px; }
+.publicInfo p { margin-bottom: 0; }
+@media (max-width: 900px) {
+  .publicHero, .publicInfo { grid-template-columns: 1fr; }
+  .heroGrid { grid-template-columns: 1fr; }
+  .adminLink { display: none; }
+  .publicPage { padding: 16px; }
+  .heroCard, .publicFormCard { border-radius: 26px; }
+}
