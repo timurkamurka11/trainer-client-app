@@ -198,10 +198,29 @@ function PublicPage(){
             <div className="info"><b>Важно:</b> гостевой визит в клуб стоит 1500 ₽. Если потом оформляете абонемент, эта сумма идёт в счёт абонемента. Сам разбор от меня — бесплатно.</div>
 
             <b>1. Выберите дату</b>
-            {loading ? <p className="muted">Загрузка...</p> : <div className="days">
-              {dates.length === 0 && !loading && (
+
+{loading ? (
+  <div className="loading-box">
+    Загружаю свободное время...
+  </div>
+) : dates.length > 0 ? (
+  <div className="days">
+    {dates.map((d) => (
+      <button
+        key={d}
+        className={"day " + (selectedDate === d ? "active" : "")}
+        onClick={() => {
+          setSelectedDate(d);
+          setSelectedSlot(null);
+        }}
+      >
+        {fmtDate(d)}
+      </button>
+    ))}
+  </div>
+) : (
   <div className="error">
-    Календарь не загрузился. Попробуйте обновить.
+    Календарь не загрузился или сейчас нет свободных дат.
     <div style={{ marginTop: 10 }}>
       <button className="btn small soft" onClick={load}>
         Обновить календарь
