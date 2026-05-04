@@ -49,49 +49,25 @@ const withTimeout = (promise, ms = 7000) => {
 };
 
 async function getSlots() {
-  if (!supabase) return demoSlots();
-
-  const slotsResult = await withTimeout(
-    supabase
-      .from("booking_slots")
-      .select("*")
-      .eq("is_active", true)
-      .order("date", { ascending: true })
-      .order("start_time", { ascending: true })
-      .limit(150),
+  const response = await withTimeout(
+    fetch(`/api/slots?t=${Date.now()}`, {
+      method: "GET",
+      cache: "no-store",
+    }),
     10000
   );
 
-  if (slotsResult.error) throw slotsResult.error;
+  if (!response.ok) {
+    throw new Error("Не удалось загрузить свободное время");
+  }
 
-  const requestsResult = await withTimeout(
-    supabase
-      .from("booking_requests")
-      .select("slot_id,status")
-      .neq("status", "cancelled"),
-    10000
-  );
+  const result = await response.json();
 
-  if (requestsResult.error) throw requestsResult.error;
+  if (result.error) {
+    throw new Error(result.error);
+  }
 
-  const booked = {};
-
-  (requestsResult.data || []).forEach((request) => {
-    booked[request.slot_id] = (booked[request.slot_id] || 0) + 1;
-  });
-
-  return (slotsResult.data || [])
-    .map((slot) => {
-      const bookedCount = booked[slot.id] || 0;
-      const capacity = Number(slot.capacity || 1);
-
-      return {
-        ...slot,
-        booked: bookedCount,
-        available: Math.max(capacity - bookedCount, 0),
-      };
-    })
-    .filter((slot) => slot.available > 0);
+  return result.slots || [];
 }
 function demoSlots() {
   return [
