@@ -158,3 +158,24 @@ em { font-style: normal; background: #f8f3e9; color: #93630e; border-radius: 999
   .publicInfo h2 { font-size: 19px; }
   .publicInfo p { font-size: 14px; }
 }
+
+/* Booking calendar */
+.bookingCalendar { margin-top: 18px; display: grid; gap: 12px; }
+.bookingCalendar h3 { margin: 8px 0 2px; font-size: 15px; }
+.dateGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.dateGrid button, .slotGrid button { border: 1px solid #e4dccf; background: #fff; border-radius: 16px; padding: 12px 10px; text-align: left; cursor: pointer; transition: .18s; color: #18181b; }
+.dateGrid button b, .slotGrid button b { display: block; font-size: 13px; }
+.dateGrid button span, .slotGrid button span { display: block; margin-top: 4px; font-size: 12px; color: #71717a; }
+.dateGrid button.active, .slotGrid button.active { border-color: #0b0b10; background: #0b0b10; color: white; }
+.dateGrid button.active span, .slotGrid button.active span { color: #f2d08a; }
+.dateGrid button:disabled, .slotGrid button:disabled { cursor: not-allowed; opacity: .45; background: #f3f0ea; }
+.slotGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
+.loadingSlots, .emptySlots { border: 1px dashed #ddd6ca; border-radius: 18px; padding: 14px; color: #71717a; font-size: 14px; }
+.demoNotice, .errorNotice { margin-top: 12px; border-radius: 18px; padding: 13px 14px; font-size: 13px; line-height: 1.5; }
+.demoNotice { background: #eff6ff; color: #1e3a8a; border: 1px solid #bfdbfe; }
+.errorNotice { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+@media (max-width: 600px) {
+  .dateGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .slotGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dateGrid button, .slotGrid button { border-radius: 15px; padding: 11px; }
+}

@@ -1,6 +1,21 @@
-# Trainer Client App
+# TimFit CRM + клиентская запись
 
-React + Vite приложение для тренера: CRM, лиды, запись, шаблоны, площадки и клиентская страница `/razbor`.
+## Что добавлено
+
+Теперь главная страница сайта — это клиентская страница записи:
+
+- `https://timfit.vercel.app/` — для клиента
+- `https://timfit.vercel.app/admin` — CRM для тренера
+
+На клиентской странице есть календарь:
+
+- клиент выбирает дату;
+- видит только свободные места;
+- выбирает время;
+- если место занято, слот становится недоступен;
+- заявка отправляется в базу Supabase через функцию `create_booking`.
+
+Если Supabase ещё не подключён, календарь работает в демо-режиме на устройстве.
 
 ## Локальный запуск
 
@@ -9,46 +24,60 @@ npm install
 npm run dev
 ```
 
-Открыть CRM:
+Открыть:
 
 ```text
 http://127.0.0.1:5173/
+http://127.0.0.1:5173/admin
 ```
 
-Открыть клиентскую страницу:
+## Подключение Supabase
+
+1. Зарегистрируйся на https://supabase.com
+2. Создай новый проект.
+3. Открой SQL Editor.
+4. Вставь содержимое файла `supabase.sql`.
+5. Нажми Run.
+6. Открой Project Settings → API.
+7. Скопируй:
+   - Project URL;
+   - anon public key.
+
+## Переменные окружения на Vercel
+
+В Vercel открой:
 
 ```text
-http://127.0.0.1:5173/razbor
+Project → Settings → Environment Variables
 ```
 
-## Деплой на Vercel
-
-Build Command:
-
-```bash
-npm run build
-```
-
-Output Directory:
+Добавь:
 
 ```text
-dist
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-Файл `vercel.json` нужен, чтобы ссылка `/razbor` открывалась напрямую и не давала 404.
+После этого сделай Redeploy.
+
+## Как управлять свободными местами
+
+Вариант 1 — через Supabase:
+
+Открой таблицу `booking_slots` и добавляй строки:
+
+- `date` — дата, например `2026-05-10`
+- `start_time` — время, например `19:00`
+- `capacity` — сколько человек можно записать на этот слот, обычно `1`
+- `is_active` — `true`
+
+Вариант 2 — через CRM:
+
+Открой `/admin` → раздел `Запись` → блок `Слоты для клиентской страницы`.
+
+Для добавления слотов из CRM нужны политики Supabase для authenticated пользователя. Базовый SQL уже включает такие политики, но вход в админку можно усилить отдельным логином на следующем этапе.
 
 ## Важно
 
-Сейчас заявки сохраняются в localStorage браузера. После публикации в интернете форму нужно подключить к базе данных: Supabase, Firebase, Google Sheets или Airtable.
-
-
-## Public and admin routes
-
-- Client landing page: `/` and `/razbor`
-- Trainer CRM/admin page: `/admin`
-
-After deploying to Vercel, send clients the main domain, for example:
-`https://timfit.vercel.app/`
-
-Open your trainer CRM here:
-`https://timfit.vercel.app/admin`
+Сейчас бронирование через публичную страницу делается безопасно через Supabase RPC `create_booking`.
+Функция проверяет занятость слота прямо в базе перед созданием заявки, поэтому два клиента не должны занять одно и то же место при capacity = 1.

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { createClient } from '@supabase/supabase-js';
 import './styles.css';
 
 const defaultTrainer = {
@@ -100,6 +101,93 @@ function useStorage(key, initial) {
     localStorage.setItem(key, JSON.stringify(value));
   }, [key, value]);
   return [value, setValue];
+}
+
+
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
+
+function toISODate(date) {
+  const d = new Date(date);
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 10);
+}
+
+function addDays(date, days) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function formatHumanDate(iso) {
+  return new Date(`${iso}T12:00:00`).toLocaleDateString('ru-RU', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short'
+  });
+}
+
+function demoSlots() {
+  const booked = JSON.parse(localStorage.getItem('timfit_demo_booked_slots') || '[]');
+  const times = ['10:00', '12:00', '15:00', '18:30', '20:00'];
+  const result = [];
+  for (let i = 0; i < 21; i += 1) {
+    const date = toISODate(addDays(new Date(), i));
+    times.forEach((time, idx) => {
+      const id = `${date}-${time}`;
+      const isBooked = booked.includes(id);
+      const weekend = [0, 6].includes(new Date(`${date}T12:00:00`).getDay());
+      if (!weekend || idx < 3) {
+        result.push({
+          id,
+          date,
+          start_time: time,
+          available: isBooked ? 0 : 1,
+          capacity: 1,
+          isDemo: true
+        });
+      }
+    });
+  }
+  return result;
+}
+
+async function loadAvailableSlots() {
+  if (!supabase) return { data: demoSlots(), error: null, isDemo: true };
+  const from = toISODate(new Date());
+  const to = toISODate(addDays(new Date(), 35));
+  const { data, error } = await supabase
+    .from('available_slots')
+    .select('*')
+    .gte('date', from)
+    .lte('date', to)
+    .order('date', { ascending: true })
+    .order('start_time', { ascending: true });
+  return { data: data || [], error, isDemo: false };
+}
+
+async function bookSlot({ slot, form }) {
+  if (!slot) return { error: { message: 'Выберите дату и время.' } };
+
+  if (!supabase || slot.isDemo) {
+    const booked = JSON.parse(localStorage.getItem('timfit_demo_booked_slots') || '[]');
+    if (booked.includes(slot.id)) return { error: { message: 'Это время уже заняли. Выберите другое.' } };
+    localStorage.setItem('timfit_demo_booked_slots', JSON.stringify([...booked, slot.id]));
+    return { data: { ok: true, demo: true }, error: null };
+  }
+
+  const { data, error } = await supabase.rpc('create_booking', {
+    p_slot_id: slot.id,
+    p_client_name: form.name,
+    p_contact: form.contact,
+    p_goal: form.goal,
+    p_format: form.format,
+    p_comment: form.comment || ''
+  });
+
+  return { data, error };
 }
 
 function Button({ children, variant = 'dark', ...props }) {
@@ -317,30 +405,97 @@ function Messages({ templates, outbox, setOutbox }) {
 
 function CalendarPage({ bookings, setBookings, leads }) {
   const [form, setForm] = useState({ client: '', type: 'Очный разбор', date: 'Сегодня', time: '19:00' });
+  const [cloudSlots, setCloudSlots] = useState([]);
+  const [slotForm, setSlotForm] = useState({ date: toISODate(new Date()), start_time: '19:00', capacity: 1 });
+  const [cloudMessage, setCloudMessage] = useState('');
+
+  async function refreshCloudSlots() {
+    const { data } = await loadAvailableSlots();
+    setCloudSlots(data || []);
+  }
+
+  useEffect(() => {
+    refreshCloudSlots();
+  }, []);
+
   function addBooking() {
     if (!form.client.trim()) return;
     setBookings([{ id: Date.now(), ...form, status: 'Ожидает подтверждения' }, ...bookings]);
     setForm({ client: '', type: 'Очный разбор', date: 'Сегодня', time: '19:00' });
   }
+
+  async function addCloudSlot() {
+    setCloudMessage('');
+    if (!supabase) {
+      setCloudMessage('Для общего календаря нужно подключить Supabase. Пока это демо-режим.');
+      return;
+    }
+    const { error } = await supabase.from('booking_slots').insert({
+      date: slotForm.date,
+      start_time: slotForm.start_time,
+      capacity: Number(slotForm.capacity || 1),
+      is_active: true
+    });
+    if (error) {
+      setCloudMessage(`Ошибка: ${error.message}. Проверьте политики Supabase или добавьте слот через таблицу booking_slots.`);
+      return;
+    }
+    setCloudMessage('Слот добавлен. Теперь клиент увидит его на странице записи.');
+    await refreshCloudSlots();
+  }
+
+  const visibleSlots = (cloudSlots || []).slice(0, 20);
+
   return (
-    <div className="grid three">
-      <Card>
-        <h2>Новая запись</h2>
-        <div className="form">
-          <Input list="leadNames" placeholder="Имя клиента" value={form.client} onChange={(e) => setForm({ ...form, client: e.target.value })} />
-          <datalist id="leadNames">{leads.map((l) => <option key={l.id} value={l.name} />)}</datalist>
-          <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-            <option>Очный разбор</option><option>Онлайн-разбор</option><option>Первая тренировка</option><option>Персональная тренировка</option>
-          </Select>
-          <Input value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-          <Input value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} />
-          <Button onClick={addBooking}>Записать</Button>
-        </div>
-      </Card>
-      <Card className="wide">
-        <h2>Расписание</h2>
-        <div className="tileGrid">{bookings.map((b) => <div className="tile" key={b.id}><b>{b.client}</b><p>{b.type}</p><strong>{b.date} • {b.time}</strong><em>{b.status}</em></div>)}</div>
-      </Card>
+    <div className="page">
+      <div className="grid three">
+        <Card>
+          <h2>Слоты для клиентской страницы</h2>
+          <p>Создай свободное место — клиент сможет выбрать его на главной странице.</p>
+          <div className="form">
+            <Input type="date" value={slotForm.date} onChange={(e) => setSlotForm({ ...slotForm, date: e.target.value })} />
+            <Input type="time" value={slotForm.start_time} onChange={(e) => setSlotForm({ ...slotForm, start_time: e.target.value })} />
+            <Input type="number" min="1" max="5" value={slotForm.capacity} onChange={(e) => setSlotForm({ ...slotForm, capacity: e.target.value })} />
+            <Button onClick={addCloudSlot}>Добавить свободное место</Button>
+          </div>
+          {cloudMessage && <div className="hint">{cloudMessage}</div>}
+          {!supabase && <div className="hint">Supabase не подключен. Клиентская страница показывает демо-слоты, но они не общие для всех.</div>}
+        </Card>
+
+        <Card className="wide">
+          <h2>Свободные места в базе</h2>
+          <div className="tileGrid">
+            {visibleSlots.map((slot) => (
+              <div className="tile" key={slot.id}>
+                <b>{formatHumanDate(slot.date)}</b>
+                <p>{slot.start_time}</p>
+                <strong>{Number(slot.available ?? 0) > 0 ? `Свободно: ${slot.available}` : 'Занято'}</strong>
+                <em>{slot.isDemo ? 'демо' : 'база'}</em>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid three">
+        <Card>
+          <h2>Ручная запись в CRM</h2>
+          <div className="form">
+            <Input list="leadNames" placeholder="Имя клиента" value={form.client} onChange={(e) => setForm({ ...form, client: e.target.value })} />
+            <datalist id="leadNames">{leads.map((l) => <option key={l.id} value={l.name} />)}</datalist>
+            <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+              <option>Очный разбор</option><option>Онлайн-разбор</option><option>Первая тренировка</option><option>Персональная тренировка</option>
+            </Select>
+            <Input value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+            <Input value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} />
+            <Button onClick={addBooking}>Записать</Button>
+          </div>
+        </Card>
+        <Card className="wide">
+          <h2>Локальное расписание CRM</h2>
+          <div className="tileGrid">{bookings.map((b) => <div className="tile" key={b.id}><b>{b.client}</b><p>{b.type}</p><strong>{b.date} • {b.time}</strong><em>{b.status}</em></div>)}</div>
+        </Card>
+      </div>
     </div>
   );
 }
@@ -416,34 +571,102 @@ function Profile({ trainer, setTrainer }) {
 
 function PublicLanding() {
   const [sent, setSent] = useState(false);
+  const [slots, setSlots] = useState([]);
+  const [slotsLoading, setSlotsLoading] = useState(true);
+  const [slotsError, setSlotsError] = useState('');
+  const [selectedDate, setSelectedDate] = useState('');
+  const [selectedSlotId, setSelectedSlotId] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     name: '',
     contact: '',
     goal: 'Похудеть / подтянуть форму',
     format: 'Очно в HITFitness',
-    time: '',
     comment: ''
   });
 
-  function submit() {
-    if (!form.name.trim() || !form.contact.trim()) return;
+  async function refreshSlots() {
+    setSlotsLoading(true);
+    setSlotsError('');
+    const { data, error, isDemo } = await loadAvailableSlots();
+    if (error) {
+      setSlotsError('Не удалось загрузить расписание. Попробуйте позже или напишите Тимy напрямую.');
+      setSlots([]);
+    } else {
+      const normalized = (data || []).map((slot) => ({
+        ...slot,
+        available: Number(slot.available ?? slot.available_count ?? slot.capacity ?? 0),
+        isDemo: Boolean(isDemo || slot.isDemo)
+      }));
+      setSlots(normalized);
+      const firstAvailable = normalized.find((slot) => Number(slot.available) > 0);
+      if (firstAvailable && !selectedDate) {
+        setSelectedDate(firstAvailable.date);
+        setSelectedSlotId(firstAvailable.id);
+      }
+    }
+    setSlotsLoading(false);
+  }
+
+  useEffect(() => {
+    refreshSlots();
+  }, []);
+
+  const slotsByDate = useMemo(() => {
+    return slots.reduce((acc, slot) => {
+      if (!acc[slot.date]) acc[slot.date] = [];
+      acc[slot.date].push(slot);
+      return acc;
+    }, {});
+  }, [slots]);
+
+  const calendarDays = useMemo(() => {
+    return Array.from({ length: 21 }, (_, i) => {
+      const date = toISODate(addDays(new Date(), i));
+      const daySlots = slotsByDate[date] || [];
+      const available = daySlots.reduce((sum, slot) => sum + Number(slot.available || 0), 0);
+      return { date, available };
+    });
+  }, [slotsByDate]);
+
+  const selectedSlots = slotsByDate[selectedDate] || [];
+  const selectedSlot = slots.find((slot) => String(slot.id) === String(selectedSlotId));
+
+  async function submit() {
+    if (!form.name.trim() || !form.contact.trim() || !selectedSlot) return;
+    setSubmitting(true);
+    setSlotsError('');
+
+    const { error } = await bookSlot({ slot: selectedSlot, form });
+
+    if (error) {
+      setSlotsError(error.message || 'Это время уже занято. Выберите другой слот.');
+      await refreshSlots();
+      setSubmitting(false);
+      return;
+    }
+
     const lead = {
       id: Date.now(),
       name: form.name,
-      source: 'Страница /razbor',
+      source: 'Страница записи',
       goal: form.goal,
       format: form.format.includes('Очно') ? 'Очно' : form.format.includes('Онлайн') ? 'Онлайн' : 'Не выбрал',
       status: 'Новый лид',
-      nextStep: 'Связаться и подтвердить формат/время разбора',
+      nextStep: 'Подтвердить запись и написать клиенту',
       followUp: 'Сегодня',
-      notes: `Контакт: ${form.contact}. Удобное время: ${form.time || 'не указано'}. Комментарий: ${form.comment || '—'}`,
+      notes: `Контакт: ${form.contact}. Дата: ${formatHumanDate(selectedSlot.date)}. Время: ${selectedSlot.start_time}. Комментарий: ${form.comment || '—'}`,
       createdAt: new Date().toLocaleString('ru-RU')
     };
+
     try {
       const saved = JSON.parse(localStorage.getItem('timfit_leads') || '[]');
       localStorage.setItem('timfit_leads', JSON.stringify([lead, ...saved]));
       window.dispatchEvent(new Event('storage'));
     } catch {}
+
+    await refreshSlots();
+    setSubmitting(false);
     setSent(true);
   }
 
@@ -458,13 +681,13 @@ function PublicLanding() {
               <span>ТРК «Лео Молл», м. Комендантский проспект</span>
             </div>
           </div>
-          <a className="adminLink" href="/">Для тренера</a>
+          <a className="adminLink" href="/admin">Для тренера</a>
         </div>
 
         <div className="publicHero">
           <section className="heroCard">
             <span className="badge">Бесплатный фитнес-разбор</span>
-            <h1>Начните тренировки без хаоса и ошибок</h1>
+            <h1>Выберите удобную дату и запишитесь на разбор</h1>
             <p>
               Меня зовут Тим. Я персональный тренер в HITFitness. Помогаю начать с нуля,
               похудеть, набрать мышечную массу, поставить технику и собрать понятный план тренировок.
@@ -472,7 +695,7 @@ function PublicLanding() {
             <div className="heroGrid">
               <div><b>Очно</b><span>HITFitness, Лео Молл</span></div>
               <div><b>Онлайн</b><span>переписка или созвон</span></div>
-              <div><b>15–20 минут</b><span>быстрый разбор цели</span></div>
+              <div><b>Календарь</b><span>видны только свободные места</span></div>
               <div><b>Без давления</b><span>спокойно и по делу</span></div>
             </div>
           </section>
@@ -482,16 +705,68 @@ function PublicLanding() {
               <div className="successBox">
                 <div className="successIcon">✓</div>
                 <h2>Заявка отправлена</h2>
-                <p>Тим увидит заявку и напишет, чтобы согласовать формат и время разбора.</p>
-                <Button onClick={() => setSent(false)}>Отправить ещё одну</Button>
+                <p>Тим увидит заявку и напишет, чтобы подтвердить выбранные дату и время.</p>
+                <Button onClick={() => setSent(false)}>Записаться ещё раз</Button>
               </div>
             ) : (
               <>
                 <h2>Записаться на разбор</h2>
-                <p>Заполните короткую форму. Я посмотрю цель и подскажу, какой формат лучше: очно или онлайн.</p>
+                <p>Выберите свободную дату и время. Если слот занят, он будет недоступен.</p>
                 <div className="guestNotice">
                   <b>Важно для очного формата:</b> гостевой визит в клуб стоит 1500 ₽. Если потом оформляете абонемент, эта сумма идёт в счёт абонемента. Сам разбор от меня — бесплатно.
                 </div>
+                {!supabase && (
+                  <div className="demoNotice">
+                    Сейчас календарь работает в демо-режиме. После подключения Supabase свободные места будут синхронизироваться между всеми клиентами.
+                  </div>
+                )}
+                {slotsError && <div className="errorNotice">{slotsError}</div>}
+
+                <div className="bookingCalendar">
+                  <h3>1. Выберите день</h3>
+                  {slotsLoading ? (
+                    <div className="loadingSlots">Загружаю свободные места...</div>
+                  ) : (
+                    <div className="dateGrid">
+                      {calendarDays.map((day) => (
+                        <button
+                          key={day.date}
+                          type="button"
+                          disabled={!day.available}
+                          onClick={() => {
+                            setSelectedDate(day.date);
+                            const first = (slotsByDate[day.date] || []).find((slot) => Number(slot.available) > 0);
+                            setSelectedSlotId(first?.id || '');
+                          }}
+                          className={selectedDate === day.date ? 'active' : ''}
+                        >
+                          <b>{formatHumanDate(day.date)}</b>
+                          <span>{day.available ? `${day.available} мест` : 'нет мест'}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <h3>2. Выберите время</h3>
+                  <div className="slotGrid">
+                    {selectedSlots.length ? selectedSlots.map((slot) => {
+                      const available = Number(slot.available || 0);
+                      return (
+                        <button
+                          key={slot.id}
+                          type="button"
+                          disabled={!available}
+                          onClick={() => setSelectedSlotId(slot.id)}
+                          className={String(selectedSlotId) === String(slot.id) ? 'active' : ''}
+                        >
+                          <b>{slot.start_time}</b>
+                          <span>{available ? `свободно: ${available}` : 'занято'}</span>
+                        </button>
+                      );
+                    }) : <p className="emptySlots">Выберите день со свободными местами.</p>}
+                  </div>
+                </div>
+
                 <div className="form">
                   <Input placeholder="Ваше имя" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
                   <Input placeholder="Telegram / WhatsApp / телефон" value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} />
@@ -508,9 +783,10 @@ function PublicLanding() {
                     <option>Онлайн-разбор</option>
                     <option>Пока не знаю</option>
                   </Select>
-                  <Input placeholder="Когда удобно? Например: завтра вечером" value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} />
                   <Textarea placeholder="Комментарий: опыт, ограничения, что сейчас не получается" value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} />
-                  <Button onClick={submit}>Отправить заявку</Button>
+                  <Button onClick={submit} disabled={submitting || !selectedSlot || !form.name.trim() || !form.contact.trim()}>
+                    {submitting ? 'Отправляю...' : 'Забронировать время'}
+                  </Button>
                 </div>
               </>
             )}
@@ -520,7 +796,7 @@ function PublicLanding() {
         <div className="publicInfo">
           <Card><h2>Что входит</h2><p>Разберём цель, текущую ситуацию, ошибки и план на ближайший месяц.</p></Card>
           <Card><h2>Кому подойдёт</h2><p>Новичкам, тем, кто давно не тренировался, или тем, кто ходит в зал без результата.</p></Card>
-          <Card><h2>Что дальше</h2><p>После заявки я напишу, уточню детали и предложу удобное время.</p></Card>
+          <Card><h2>Что дальше</h2><p>После заявки я напишу и подтвержу выбранное время.</p></Card>
         </div>
       </div>
     </div>
