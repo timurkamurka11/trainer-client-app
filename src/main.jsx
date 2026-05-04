@@ -33,13 +33,22 @@ const minToTime = (min) => {
 
 async function getSlots() {
   if (!supabase) return demoSlots();
-  const { data, error } = await supabase
-    .from("booking_slots")
-    .select("*")
-    .eq("is_active", true)
-    .order("date", { ascending:true })
-    .order("start_time", { ascending:true });
+
+  const { data, error } = await withTimeout(
+    supabase
+      .from("available_booking_slots")
+      .select("id,date,start_time,end_time,capacity,booked,available")
+      .gte("date", todayISO())
+      .order("date", { ascending: true })
+      .order("start_time", { ascending: true })
+      .limit(80),
+    7000
+  );
+
   if (error) throw error;
+
+  return data || [];
+}
 
   const { data: requests, error: reqErr } = await supabase
     .from("booking_requests")
