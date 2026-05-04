@@ -308,20 +308,36 @@ function Admin(){
     } catch(e) { setError(e.message || "Не удалось добавить слоты"); }
   };
 
-  const closeSlot = async (id) => {
-    if(!confirm("Закрыть слот? Он пропадёт у клиента, но останется в базе.")) return;
-    const {error} = await supabase.from("booking_slots").update({is_active:false}).eq("id", id);
-    if(error) setError(error.message); else load();
-  };
+  const closeAllSlots = async () => {
+  if (!confirm("Закрыть все активные слоты? Они пропадут у клиентов, но останутся в базе.")) return;
 
-  const deleteSlot = async (id) => {
-    if(!confirm("Удалить слот полностью?")) return;
-    const {error} = await supabase.from("booking_slots").delete().eq("id", id);
-    if(error) setError(error.message); else load();
-  };
+  const { error } = await supabase
+    .from("booking_slots")
+    .update({ is_active: false })
+    .eq("is_active", true);
 
-  const logout = () => { localStorage.removeItem("timfit_admin_auth"); setAuthed(false); };
+  if (error) {
+    setError(error.message);
+  } else {
+    await load();
+  }
+};
 
+const deleteAllSlots = async () => {
+  if (!confirm("Удалить ВСЕ слоты полностью? Это действие нельзя отменить.")) return;
+  if (!confirm("Точно удалить все слоты? Заявки клиентов могут потерять привязку ко времени.")) return;
+
+  const { error } = await supabase
+    .from("booking_slots")
+    .delete()
+    .not("id", "is", null);
+
+  if (error) {
+    setError(error.message);
+  } else {
+    await load();
+  }
+};
   return <div className="admin">
     <aside className="sidebar">
       <div className="sidebrand"><div className="logo">T</div><div><b>TimFit CRM</b><br/><span>тренер + клиенты</span></div></div>
@@ -364,6 +380,15 @@ function Admin(){
         <section className="card">
           <h2>Свободные места в базе</h2>
           <p className="muted">Закрыть — скрыть от клиента. Удалить — убрать полностью.</p>
+          <div className="actions" style={{ marginTop: 12, marginBottom: 12 }}>
+  <button className="btn small soft" onClick={closeAllSlots}>
+    Закрыть все слоты
+  </button>
+
+  <button className="btn small red" onClick={deleteAllSlots}>
+    Удалить все слоты
+  </button>
+</div>
           <div className="slot-list">
             {slots.map(s=><div className="slot-row" key={s.id}>
               <div>
