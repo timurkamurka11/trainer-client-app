@@ -31,6 +31,23 @@ const minToTime = (min) => {
   return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
 };
 
+const timeout = (ms) =>
+  new Promise((_, reject) =>
+    setTimeout(
+      () =>
+        reject(
+          new Error(
+            "Календарь загружается слишком долго. Проверьте интернет или обновите страницу."
+          )
+        ),
+      ms
+    )
+  );
+
+const withTimeout = (promise, ms = 7000) => {
+  return Promise.race([promise, timeout(ms)]);
+};
+
 async function getSlots() {
   if (!supabase) return demoSlots();
 
