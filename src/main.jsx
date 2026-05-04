@@ -50,22 +50,6 @@ async function getSlots() {
   return data || [];
 }
 
-  const { data: requests, error: reqErr } = await supabase
-    .from("booking_requests")
-    .select("slot_id,status")
-    .neq("status", "cancelled");
-  if (reqErr) throw reqErr;
-
-  const booked = {};
-  (requests || []).forEach(r => { booked[r.slot_id] = (booked[r.slot_id] || 0) + 1; });
-
-  return (data || []).map(s => ({
-    ...s,
-    booked: booked[s.id] || 0,
-    available: Math.max(Number(s.capacity || 1) - (booked[s.id] || 0), 0)
-  })).filter(s => s.available > 0);
-}
-
 function demoSlots() {
   return [
     { id:"demo-1", date:addDaysISO(1), start_time:"10:00", end_time:"11:00", capacity:1, available:1 },
