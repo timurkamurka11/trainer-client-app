@@ -348,7 +348,14 @@ const logout = () => {
       <div className="nav">
         <button className={tab==="slots"?"active":""} onClick={()=>setTab("slots")}>Слоты</button>
         <button className={tab==="requests"?"active":""} onClick={()=>setTab("requests")}>Заявки</button>
-        <button onClick={logout}>Выйти</button>
+        <button
+  onClick={() => {
+    localStorage.removeItem("timfit_admin_auth");
+    window.location.reload();
+  }}
+>
+  Выйти
+</button>
       </div>
     </aside>
     <main className="main">
