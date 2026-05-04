@@ -55,7 +55,6 @@ async function getSlots() {
     supabase
       .from("available_booking_slots")
       .select("id,date,start_time,end_time,capacity,booked,available")
-      .gte("date", todayISO())
       .order("date", { ascending: true })
       .order("start_time", { ascending: true })
       .limit(80),
