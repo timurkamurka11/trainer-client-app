@@ -179,3 +179,5 @@ em { font-style: normal; background: #f8f3e9; color: #93630e; border-radius: 999
   .slotGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dateGrid button, .slotGrid button { border-radius: 15px; padding: 11px; }
 }
+.fieldLabel { display: grid; gap: 7px; color: #71717a; font-size: 13px; font-weight: 800; }
+.fieldLabel .input { color: #18181b; font-weight: 500; }

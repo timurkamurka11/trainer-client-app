@@ -1,5 +1,6 @@
 -- TimFit booking calendar schema for Supabase
 -- Run this in Supabase SQL Editor.
+-- This version supports time intervals: start_time + end_time.
 
 create extension if not exists pgcrypto;
 
@@ -7,11 +8,30 @@ create table if not exists booking_slots (
   id uuid primary key default gen_random_uuid(),
   date date not null,
   start_time text not null,
+  end_time text,
   capacity integer not null default 1 check (capacity > 0),
   is_active boolean not null default true,
-  created_at timestamptz not null default now(),
-  unique (date, start_time)
+  created_at timestamptz not null default now()
 );
+
+-- Safe migration for older projects where end_time did not exist yet.
+alter table booking_slots add column if not exists end_time text;
+update booking_slots
+set end_time = to_char((start_time::time + interval '1 hour'), 'HH24:MI')
+where end_time is null and start_time is not null;
+
+-- Keep one slot per start time. If you need two different intervals with the same start time,
+-- create the second one with a slightly different start time.
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'booking_slots_date_start_time_key'
+  ) then
+    alter table booking_slots add constraint booking_slots_date_start_time_key unique (date, start_time);
+  end if;
+end $$;
 
 create table if not exists booking_requests (
   id uuid primary key default gen_random_uuid(),
@@ -30,6 +50,7 @@ select
   s.id,
   s.date,
   s.start_time,
+  s.end_time,
   s.capacity,
   greatest(s.capacity - count(r.id)::int, 0) as available
 from booking_slots s
@@ -37,7 +58,7 @@ left join booking_requests r
   on r.slot_id = s.id
   and r.status not in ('cancelled', 'canceled', 'отмена')
 where s.is_active = true
-group by s.id, s.date, s.start_time, s.capacity
+group by s.id, s.date, s.start_time, s.end_time, s.capacity
 order by s.date, s.start_time;
 
 create or replace function create_booking(
@@ -87,15 +108,11 @@ $$;
 alter table booking_slots enable row level security;
 alter table booking_requests enable row level security;
 
--- Public visitors may read only active free slots via the base table/view.
 drop policy if exists "Public can read active slots" on booking_slots;
 create policy "Public can read active slots"
 on booking_slots for select
 to anon, authenticated
 using (is_active = true);
-
--- Public visitors should not read personal booking requests.
--- They book through the create_booking RPC function.
 
 drop policy if exists "Authenticated can manage slots" on booking_slots;
 create policy "Authenticated can manage slots"
@@ -117,12 +134,12 @@ to authenticated
 using (true)
 with check (true);
 
--- Example slots. You can delete or edit them.
-insert into booking_slots(date, start_time, capacity)
+-- Example interval slots. You can delete or edit them.
+insert into booking_slots(date, start_time, end_time, capacity)
 values
-  (current_date + interval '1 day', '10:00', 1),
-  (current_date + interval '1 day', '18:30', 1),
-  (current_date + interval '2 day', '12:00', 1),
-  (current_date + interval '2 day', '20:00', 1),
-  (current_date + interval '3 day', '15:00', 1)
+  (current_date + interval '1 day', '10:00', '11:00', 1),
+  (current_date + interval '1 day', '18:30', '19:30', 1),
+  (current_date + interval '2 day', '12:00', '13:00', 1),
+  (current_date + interval '2 day', '20:00', '21:00', 1),
+  (current_date + interval '3 day', '15:00', '16:00', 1)
 on conflict (date, start_time) do nothing;

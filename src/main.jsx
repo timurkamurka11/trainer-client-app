@@ -107,7 +107,17 @@ function useStorage(key, initial) {
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
+let supabaseConfigError = '';
+let supabase = null;
+
+if (supabaseUrl && supabaseAnonKey) {
+  try {
+    supabase = createClient(supabaseUrl.trim(), supabaseAnonKey.trim());
+  } catch (error) {
+    supabaseConfigError = error?.message || 'Ошибка подключения Supabase';
+    supabase = null;
+  }
+}
 
 function toISODate(date) {
   const d = new Date(date);
@@ -129,6 +139,25 @@ function formatHumanDate(iso) {
   });
 }
 
+function addMinutesToTime(time, minutes) {
+  const [hours, mins] = String(time || '00:00').split(':').map(Number);
+  const total = (hours * 60) + mins + minutes;
+  const normalized = ((total % 1440) + 1440) % 1440;
+  const hh = String(Math.floor(normalized / 60)).padStart(2, '0');
+  const mm = String(normalized % 60).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+function isEndAfterStart(start, end) {
+  if (!start || !end) return false;
+  return String(end) > String(start);
+}
+
+function formatSlotTime(slot) {
+  if (!slot) return '';
+  return slot.end_time ? `${slot.start_time}–${slot.end_time}` : slot.start_time;
+}
+
 function demoSlots() {
   const booked = JSON.parse(localStorage.getItem('timfit_demo_booked_slots') || '[]');
   const times = ['10:00', '12:00', '15:00', '18:30', '20:00'];
@@ -144,6 +173,7 @@ function demoSlots() {
           id,
           date,
           start_time: time,
+          end_time: addMinutesToTime(time, 60),
           available: isBooked ? 0 : 1,
           capacity: 1,
           isDemo: true
@@ -406,7 +436,7 @@ function Messages({ templates, outbox, setOutbox }) {
 function CalendarPage({ bookings, setBookings, leads }) {
   const [form, setForm] = useState({ client: '', type: 'Очный разбор', date: 'Сегодня', time: '19:00' });
   const [cloudSlots, setCloudSlots] = useState([]);
-  const [slotForm, setSlotForm] = useState({ date: toISODate(new Date()), start_time: '19:00', capacity: 1 });
+  const [slotForm, setSlotForm] = useState({ date: toISODate(new Date()), start_time: '19:00', end_time: '20:00', capacity: 1 });
   const [cloudMessage, setCloudMessage] = useState('');
 
   async function refreshCloudSlots() {
@@ -430,9 +460,15 @@ function CalendarPage({ bookings, setBookings, leads }) {
       setCloudMessage('Для общего календаря нужно подключить Supabase. Пока это демо-режим.');
       return;
     }
+    if (!isEndAfterStart(slotForm.start_time, slotForm.end_time)) {
+      setCloudMessage('Укажи корректный промежуток: время «до» должно быть позже времени «с».');
+      return;
+    }
+
     const { error } = await supabase.from('booking_slots').insert({
       date: slotForm.date,
       start_time: slotForm.start_time,
+      end_time: slotForm.end_time,
       capacity: Number(slotForm.capacity || 1),
       is_active: true
     });
@@ -453,10 +489,11 @@ function CalendarPage({ bookings, setBookings, leads }) {
           <h2>Слоты для клиентской страницы</h2>
           <p>Создай свободное место — клиент сможет выбрать его на главной странице.</p>
           <div className="form">
-            <Input type="date" value={slotForm.date} onChange={(e) => setSlotForm({ ...slotForm, date: e.target.value })} />
-            <Input type="time" value={slotForm.start_time} onChange={(e) => setSlotForm({ ...slotForm, start_time: e.target.value })} />
-            <Input type="number" min="1" max="5" value={slotForm.capacity} onChange={(e) => setSlotForm({ ...slotForm, capacity: e.target.value })} />
-            <Button onClick={addCloudSlot}>Добавить свободное место</Button>
+            <label className="fieldLabel">Дата<Input type="date" value={slotForm.date} onChange={(e) => setSlotForm({ ...slotForm, date: e.target.value })} /></label>
+            <label className="fieldLabel">С какого времени<Input type="time" value={slotForm.start_time} onChange={(e) => setSlotForm({ ...slotForm, start_time: e.target.value, end_time: isEndAfterStart(e.target.value, slotForm.end_time) ? slotForm.end_time : addMinutesToTime(e.target.value, 60) })} /></label>
+            <label className="fieldLabel">До какого времени<Input type="time" value={slotForm.end_time} onChange={(e) => setSlotForm({ ...slotForm, end_time: e.target.value })} /></label>
+            <label className="fieldLabel">Количество мест<Input type="number" min="1" max="5" value={slotForm.capacity} onChange={(e) => setSlotForm({ ...slotForm, capacity: e.target.value })} /></label>
+            <Button onClick={addCloudSlot}>Добавить промежуток</Button>
           </div>
           {cloudMessage && <div className="hint">{cloudMessage}</div>}
           {!supabase && <div className="hint">Supabase не подключен. Клиентская страница показывает демо-слоты, но они не общие для всех.</div>}
@@ -468,7 +505,7 @@ function CalendarPage({ bookings, setBookings, leads }) {
             {visibleSlots.map((slot) => (
               <div className="tile" key={slot.id}>
                 <b>{formatHumanDate(slot.date)}</b>
-                <p>{slot.start_time}</p>
+                <p>{formatSlotTime(slot)}</p>
                 <strong>{Number(slot.available ?? 0) > 0 ? `Свободно: ${slot.available}` : 'Занято'}</strong>
                 <em>{slot.isDemo ? 'демо' : 'база'}</em>
               </div>
@@ -655,7 +692,7 @@ function PublicLanding() {
       status: 'Новый лид',
       nextStep: 'Подтвердить запись и написать клиенту',
       followUp: 'Сегодня',
-      notes: `Контакт: ${form.contact}. Дата: ${formatHumanDate(selectedSlot.date)}. Время: ${selectedSlot.start_time}. Комментарий: ${form.comment || '—'}`,
+      notes: `Контакт: ${form.contact}. Дата: ${formatHumanDate(selectedSlot.date)}. Время: ${formatSlotTime(selectedSlot)}. Комментарий: ${form.comment || '—'}`,
       createdAt: new Date().toLocaleString('ru-RU')
     };
 
@@ -715,6 +752,11 @@ function PublicLanding() {
                 <div className="guestNotice">
                   <b>Важно для очного формата:</b> гостевой визит в клуб стоит 1500 ₽. Если потом оформляете абонемент, эта сумма идёт в счёт абонемента. Сам разбор от меня — бесплатно.
                 </div>
+                {supabaseConfigError && (
+                  <div className="errorNotice">
+                    Ошибка подключения Supabase: {supabaseConfigError}. Проверьте VITE_SUPABASE_URL и VITE_SUPABASE_ANON_KEY в Vercel.
+                  </div>
+                )}
                 {!supabase && (
                   <div className="demoNotice">
                     Сейчас календарь работает в демо-режиме. После подключения Supabase свободные места будут синхронизироваться между всеми клиентами.
@@ -747,7 +789,7 @@ function PublicLanding() {
                     </div>
                   )}
 
-                  <h3>2. Выберите время</h3>
+                  <h3>2. Выберите промежуток времени</h3>
                   <div className="slotGrid">
                     {selectedSlots.length ? selectedSlots.map((slot) => {
                       const available = Number(slot.available || 0);
@@ -759,7 +801,7 @@ function PublicLanding() {
                           onClick={() => setSelectedSlotId(slot.id)}
                           className={String(selectedSlotId) === String(slot.id) ? 'active' : ''}
                         >
-                          <b>{slot.start_time}</b>
+                          <b>{formatSlotTime(slot)}</b>
                           <span>{available ? `свободно: ${available}` : 'занято'}</span>
                         </button>
                       );
@@ -801,6 +843,34 @@ function PublicLanding() {
       </div>
     </div>
   );
+}
+
+
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="publicPage">
+          <div className="publicWrap">
+            <div className="errorNotice">
+              <b>Ошибка загрузки страницы.</b><br />
+              {String(this.state.error?.message || this.state.error)}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 function App() {
@@ -847,4 +917,4 @@ function App() {
   );
 }
 
-createRoot(document.getElementById('root')).render(<App />);
+createRoot(document.getElementById('root')).render(<ErrorBoundary><App /></ErrorBoundary>);
