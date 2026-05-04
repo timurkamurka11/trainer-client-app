@@ -338,6 +338,10 @@ const deleteAllSlots = async () => {
     await load();
   }
 };
+const logout = () => {
+  localStorage.removeItem("timfit_admin_auth");
+  setAuthed(false);
+};
   return <div className="admin">
     <aside className="sidebar">
       <div className="sidebrand"><div className="logo">T</div><div><b>TimFit CRM</b><br/><span>тренер + клиенты</span></div></div>
