@@ -199,9 +199,16 @@ function PublicPage(){
 
             <b>1. Выберите дату</b>
             {loading ? <p className="muted">Загрузка...</p> : <div className="days">
-              {dates.length === 0 && <p className="muted">Пока нет свободных дат.</p>}
-              {dates.map(d => <button key={d} className={"day "+(selectedDate===d?"active":"")} onClick={()=>{setSelectedDate(d);setSelectedSlot(null)}}>{fmtDate(d)}</button>)}
-            </div>}
+              {dates.length === 0 && !loading && (
+  <div className="error">
+    Календарь не загрузился. Попробуйте обновить.
+    <div style={{ marginTop: 10 }}>
+      <button className="btn small soft" onClick={load}>
+        Обновить календарь
+      </button>
+    </div>
+  </div>
+)}
 
             <b>2. Выберите промежуток времени</b>
             <div className="slots">
