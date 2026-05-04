@@ -148,9 +148,40 @@ function addMinutesToTime(time, minutes) {
   return `${hh}:${mm}`;
 }
 
+function timeToMinutes(time) {
+  const [hours, mins] = String(time || '00:00').split(':').map(Number);
+  return (hours * 60) + mins;
+}
+
+function minutesToTime(totalMinutes) {
+  const normalized = ((totalMinutes % 1440) + 1440) % 1440;
+  const hh = String(Math.floor(normalized / 60)).padStart(2, '0');
+  const mm = String(normalized % 60).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+function makeSlotsFromRange({ date, startTime, endTime, capacity, slotMinutes }) {
+  const start = timeToMinutes(startTime);
+  const end = timeToMinutes(endTime);
+  const step = Number(slotMinutes || 60);
+  const rows = [];
+
+  for (let current = start; current + step <= end; current += step) {
+    rows.push({
+      date,
+      start_time: minutesToTime(current),
+      end_time: minutesToTime(current + step),
+      capacity: Number(capacity || 1),
+      is_active: true
+    });
+  }
+
+  return rows;
+}
+
 function isEndAfterStart(start, end) {
   if (!start || !end) return false;
-  return String(end) > String(start);
+  return timeToMinutes(end) > timeToMinutes(start);
 }
 
 function formatSlotTime(slot) {
@@ -436,7 +467,7 @@ function Messages({ templates, outbox, setOutbox }) {
 function CalendarPage({ bookings, setBookings, leads }) {
   const [form, setForm] = useState({ client: '', type: 'Очный разбор', date: 'Сегодня', time: '19:00' });
   const [cloudSlots, setCloudSlots] = useState([]);
-  const [slotForm, setSlotForm] = useState({ date: toISODate(new Date()), start_time: '19:00', end_time: '20:00', capacity: 1 });
+  const [slotForm, setSlotForm] = useState({ date: toISODate(new Date()), start_time: '10:00', end_time: '20:00', slotMinutes: 60, capacity: 1 });
   const [cloudMessage, setCloudMessage] = useState('');
 
   async function refreshCloudSlots() {
@@ -465,18 +496,28 @@ function CalendarPage({ bookings, setBookings, leads }) {
       return;
     }
 
-    const { error } = await supabase.from('booking_slots').insert({
+    const rows = makeSlotsFromRange({
       date: slotForm.date,
-      start_time: slotForm.start_time,
-      end_time: slotForm.end_time,
-      capacity: Number(slotForm.capacity || 1),
-      is_active: true
+      startTime: slotForm.start_time,
+      endTime: slotForm.end_time,
+      capacity: slotForm.capacity,
+      slotMinutes: slotForm.slotMinutes
     });
-    if (error) {
-      setCloudMessage(`Ошибка: ${error.message}. Проверьте политики Supabase или добавьте слот через таблицу booking_slots.`);
+
+    if (!rows.length) {
+      setCloudMessage('Промежуток слишком короткий. Увеличь время «до» или уменьши длительность слота.');
       return;
     }
-    setCloudMessage('Слот добавлен. Теперь клиент увидит его на странице записи.');
+
+    const { error } = await supabase
+      .from('booking_slots')
+      .upsert(rows, { onConflict: 'date,start_time', ignoreDuplicates: true });
+
+    if (error) {
+      setCloudMessage(`Ошибка: ${error.message}. Проверьте политики Supabase или добавьте слоты через таблицу booking_slots.`);
+      return;
+    }
+    setCloudMessage(`Готово: создан диапазон ${slotForm.start_time}–${slotForm.end_time}. Клиент увидит отдельные слоты по ${slotForm.slotMinutes} минут.`);
     await refreshCloudSlots();
   }
 
@@ -487,13 +528,14 @@ function CalendarPage({ bookings, setBookings, leads }) {
       <div className="grid three">
         <Card>
           <h2>Слоты для клиентской страницы</h2>
-          <p>Создай свободное место — клиент сможет выбрать его на главной странице.</p>
+          <p>Создай диапазон — клиент увидит отдельные свободные слоты внутри этого промежутка.</p>
           <div className="form">
             <label className="fieldLabel">Дата<Input type="date" value={slotForm.date} onChange={(e) => setSlotForm({ ...slotForm, date: e.target.value })} /></label>
             <label className="fieldLabel">С какого времени<Input type="time" value={slotForm.start_time} onChange={(e) => setSlotForm({ ...slotForm, start_time: e.target.value, end_time: isEndAfterStart(e.target.value, slotForm.end_time) ? slotForm.end_time : addMinutesToTime(e.target.value, 60) })} /></label>
             <label className="fieldLabel">До какого времени<Input type="time" value={slotForm.end_time} onChange={(e) => setSlotForm({ ...slotForm, end_time: e.target.value })} /></label>
-            <label className="fieldLabel">Количество мест<Input type="number" min="1" max="5" value={slotForm.capacity} onChange={(e) => setSlotForm({ ...slotForm, capacity: e.target.value })} /></label>
-            <Button onClick={addCloudSlot}>Добавить промежуток</Button>
+            <label className="fieldLabel">Длительность одного слота, мин<Input type="number" min="30" step="30" max="180" value={slotForm.slotMinutes} onChange={(e) => setSlotForm({ ...slotForm, slotMinutes: e.target.value })} /></label>
+            <label className="fieldLabel">Количество мест на каждый слот<Input type="number" min="1" max="5" value={slotForm.capacity} onChange={(e) => setSlotForm({ ...slotForm, capacity: e.target.value })} /></label>
+            <Button onClick={addCloudSlot}>Разбить диапазон на слоты</Button>
           </div>
           {cloudMessage && <div className="hint">{cloudMessage}</div>}
           {!supabase && <div className="hint">Supabase не подключен. Клиентская страница показывает демо-слоты, но они не общие для всех.</div>}
