@@ -536,7 +536,9 @@ function App() {
   const [outbox, setOutbox] = useStorage('timfit_outbox', defaultOutbox);
   const [bookings, setBookings] = useStorage('timfit_bookings', defaultBookings);
 
-  if (window.location.pathname === '/razbor') {
+  const isAdmin = window.location.pathname.startsWith('/admin');
+
+  if (!isAdmin) {
     return <PublicLanding />;
   }
 
@@ -561,7 +563,7 @@ function App() {
         <div className="mobileTabs">{tabs.map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={tab === id ? 'active' : ''}>{label}</button>)}</div>
         <div className="content">
           <Header trainer={trainer} />
-          <div className="notice"><b>Почти автоматизация:</b> приложение готовит тексты, лиды, напоминания и очередь сообщений, но публикацию подтверждает тренер. <a href="/razbor" target="_blank">Открыть страницу клиента</a></div>
+          <div className="notice"><b>Почти автоматизация:</b> приложение готовит тексты, лиды, напоминания и очередь сообщений, но публикацию подтверждает тренер. <a href="/" target="_blank">Открыть страницу клиента</a></div>
           {view}
         </div>
       </main>

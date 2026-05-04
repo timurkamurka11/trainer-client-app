@@ -40,3 +40,15 @@ dist
 ## Важно
 
 Сейчас заявки сохраняются в localStorage браузера. После публикации в интернете форму нужно подключить к базе данных: Supabase, Firebase, Google Sheets или Airtable.
+
+
+## Public and admin routes
+
+- Client landing page: `/` and `/razbor`
+- Trainer CRM/admin page: `/admin`
+
+After deploying to Vercel, send clients the main domain, for example:
+`https://timfit.vercel.app/`
+
+Open your trainer CRM here:
+`https://timfit.vercel.app/admin`
