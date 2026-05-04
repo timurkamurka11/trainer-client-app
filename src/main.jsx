@@ -52,12 +52,7 @@ async function getSlots() {
   if (!supabase) return demoSlots();
 
   const { data, error } = await withTimeout(
-    supabase
-      .from("available_booking_slots")
-      .select("id,date,start_time,end_time,capacity,booked,available")
-      .order("date", { ascending: true })
-      .order("start_time", { ascending: true })
-      .limit(80),
+    supabase.rpc("get_available_booking_slots_fast"),
     7000
   );
 
@@ -66,6 +61,49 @@ async function getSlots() {
   return data || [];
 }
 
+  // 2. Если view пустой или не сработал — берём напрямую из booking_slots
+  const slotsResult = await withTimeout(
+    supabase
+      .from("booking_slots")
+      .select("*")
+      .eq("is_active", true)
+      .order("date", { ascending: true })
+      .order("start_time", { ascending: true })
+      .limit(100),
+    7000
+  );
+
+  if (slotsResult.error) throw slotsResult.error;
+
+  const requestsResult = await withTimeout(
+    supabase
+      .from("booking_requests")
+      .select("slot_id,status")
+      .neq("status", "cancelled"),
+    7000
+  );
+
+  if (requestsResult.error) throw requestsResult.error;
+
+  const booked = {};
+
+  (requestsResult.data || []).forEach((request) => {
+    booked[request.slot_id] = (booked[request.slot_id] || 0) + 1;
+  });
+
+  return (slotsResult.data || [])
+    .map((slot) => {
+      const bookedCount = booked[slot.id] || 0;
+      const capacity = Number(slot.capacity || 1);
+
+      return {
+        ...slot,
+        booked: bookedCount,
+        available: Math.max(capacity - bookedCount, 0),
+      };
+    })
+    .filter((slot) => slot.available > 0);
+}
 function demoSlots() {
   return [
     { id:"demo-1", date:addDaysISO(1), start_time:"10:00", end_time:"11:00", capacity:1, available:1 },
