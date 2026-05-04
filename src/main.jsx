@@ -1,962 +1,368 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { createRoot } from 'react-dom/client';
-import { createClient } from '@supabase/supabase-js';
-import './styles.css';
 
-const defaultTrainer = {
-  name: 'Тим',
-  role: 'Персональный тренер',
-  club: 'HITFitness',
-  location: 'ТРК «Лео Молл», м. Комендантский проспект',
-  formats: 'Очно в зале и онлайн',
-  offer: 'Бесплатный фитнес-разбор',
-  photo: ''
+import React, { useEffect, useMemo, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { createClient } from "@supabase/supabase-js";
+import { CalendarDays, Check, Clock, Dumbbell, MapPin, MessageCircle, ShieldCheck } from "lucide-react";
+import "./styles.css";
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
+const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "timfit2026";
+
+const supabase =
+  SUPABASE_URL && SUPABASE_KEY && SUPABASE_URL.includes("supabase.co")
+    ? createClient(SUPABASE_URL, SUPABASE_KEY)
+    : null;
+
+const fmtDate = (d) => new Date(d + "T00:00:00").toLocaleDateString("ru-RU", { weekday:"short", day:"numeric", month:"long" });
+const todayISO = () => new Date().toISOString().slice(0,10);
+const addDaysISO = (n) => {
+  const d = new Date();
+  d.setDate(d.getDate()+n);
+  return d.toISOString().slice(0,10);
+};
+const timeToMin = (t) => {
+  const [h,m] = String(t || "00:00").split(":").map(Number);
+  return h*60 + (m || 0);
+};
+const minToTime = (min) => {
+  const h = Math.floor(min/60);
+  const m = min%60;
+  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
 };
 
-const defaultLeads = [
-  {
-    id: 1,
-    name: 'Анна',
-    source: 'Telegram чат ЖК',
-    goal: 'Похудеть и подтянуть форму',
-    format: 'Очно',
-    status: 'Новый лид',
-    nextStep: 'Уточнить удобное время',
-    followUp: 'Сегодня',
-    notes: 'Написала: РАЗБОР'
-  },
-  {
-    id: 2,
-    name: 'Игорь',
-    source: 'VK районная группа',
-    goal: 'Набор мышечной массы',
-    format: 'Онлайн',
-    status: 'Выбрал формат',
-    nextStep: 'Назначить онлайн-разбор',
-    followUp: 'Завтра',
-    notes: 'Хочет программу тренировок'
-  }
-];
+async function getSlots() {
+  if (!supabase) return demoSlots();
+  const { data, error } = await supabase
+    .from("booking_slots")
+    .select("*")
+    .eq("is_active", true)
+    .order("date", { ascending:true })
+    .order("start_time", { ascending:true });
+  if (error) throw error;
 
-const defaultPlatforms = [
-  { id: 1, name: 'Услуги Приморский / Комендантский', type: 'Telegram', district: 'Приморский район', rules: 'Можно публиковать услуги', status: 'Можно публиковать', lastPost: '—', result: 'Тестируется' },
-  { id: 2, name: 'VK районная группа', type: 'VK', district: 'Комендантский проспект', rules: 'Проверить правила перед публикацией', status: 'Нужно согласование', lastPost: '—', result: '—' },
-  { id: 3, name: 'Авито Услуги', type: 'Авито', district: 'СПБ', rules: 'Разместить карточку услуги', status: 'Можно публиковать', lastPost: '—', result: '—' }
-];
+  const { data: requests, error: reqErr } = await supabase
+    .from("booking_requests")
+    .select("slot_id,status")
+    .neq("status", "cancelled");
+  if (reqErr) throw reqErr;
 
-const defaultTemplates = [
-  {
-    id: 1,
-    title: 'Первое сообщение в чат',
-    type: 'Публикация',
-    text: 'Всем привет! Меня зовут Тим, я тренер в HITFitness в ТРК «Лео Молл», рядом с м. Комендантский проспект. Провожу бесплатный фитнес-разбор: цель, ошибки, программа и план на месяц. Можно очно или онлайн. Кому актуально — напишите в личку: «РАЗБОР».'
-  },
-  {
-    id: 2,
-    title: 'Ответ на «РАЗБОР»',
-    type: 'Личное сообщение',
-    text: 'Привет! Спасибо, что написал(а) 🙌 Меня зовут Тим, я тренер в HITFitness. Подскажи, тебе удобнее сделать разбор очно в зале или онлайн? Очно можем встретиться в HITFitness в ТРК «Лео Молл», онлайн — в переписке или созвоне.'
-  },
-  {
-    id: 3,
-    title: 'Follow-up после молчания',
-    type: 'Follow-up',
-    text: 'Привет! Напомню про фитнес-разбор. Могу коротко подсказать, с чего начать именно в твоей ситуации. Удобнее очно или онлайн?'
-  }
-];
+  const booked = {};
+  (requests || []).forEach(r => { booked[r.slot_id] = (booked[r.slot_id] || 0) + 1; });
 
-const defaultOutbox = [
-  { id: 1, channel: 'Telegram / чат услуг', title: 'Пост: бесплатный фитнес-разбор', status: 'Ожидает подтверждения', scheduled: 'Сегодня, 18:30' },
-  { id: 2, channel: 'Анна / личные сообщения', title: 'Ответ на «РАЗБОР»', status: 'Ожидает подтверждения', scheduled: 'Сейчас' }
-];
-
-const defaultBookings = [
-  { id: 1, client: 'Анна', type: 'Очный разбор', date: 'Сегодня', time: '19:00', status: 'Ожидает подтверждения' },
-  { id: 2, client: 'Игорь', type: 'Онлайн-разбор', date: 'Завтра', time: '12:30', status: 'Слот предложен' }
-];
-
-const statuses = ['Новый лид', 'Ответил', 'Выбрал формат', 'Назначен разбор', 'Прошел разбор', 'Записан на тренировку', 'Купил пакет', 'Думает', 'Отказ', 'Написать позже'];
-const tabs = [
-  ['dashboard', 'Главная'],
-  ['leads', 'Лиды'],
-  ['messages', 'Сообщения'],
-  ['calendar', 'Запись'],
-  ['platforms', 'Площадки'],
-  ['templates', 'Шаблоны'],
-  ['client', 'Анкета'],
-  ['analytics', 'Аналитика'],
-  ['profile', 'Профиль']
-];
-
-function useStorage(key, initial) {
-  const [value, setValue] = useState(() => {
-    try {
-      const saved = localStorage.getItem(key);
-      return saved ? JSON.parse(saved) : initial;
-    } catch {
-      return initial;
-    }
-  });
-  useEffect(() => {
-    localStorage.setItem(key, JSON.stringify(value));
-  }, [key, value]);
-  return [value, setValue];
-}
-
-
-
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-let supabaseConfigError = '';
-let supabase = null;
-
-if (supabaseUrl && supabaseAnonKey) {
-  try {
-    supabase = createClient(supabaseUrl.trim(), supabaseAnonKey.trim());
-  } catch (error) {
-    supabaseConfigError = error?.message || 'Ошибка подключения Supabase';
-    supabase = null;
-  }
-}
-
-function toISODate(date) {
-  const d = new Date(date);
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-  return d.toISOString().slice(0, 10);
-}
-
-function addDays(date, days) {
-  const d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return d;
-}
-
-function formatHumanDate(iso) {
-  return new Date(`${iso}T12:00:00`).toLocaleDateString('ru-RU', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short'
-  });
-}
-
-function addMinutesToTime(time, minutes) {
-  const [hours, mins] = String(time || '00:00').split(':').map(Number);
-  const total = (hours * 60) + mins + minutes;
-  const normalized = ((total % 1440) + 1440) % 1440;
-  const hh = String(Math.floor(normalized / 60)).padStart(2, '0');
-  const mm = String(normalized % 60).padStart(2, '0');
-  return `${hh}:${mm}`;
-}
-
-function timeToMinutes(time) {
-  const [hours, mins] = String(time || '00:00').split(':').map(Number);
-  return (hours * 60) + mins;
-}
-
-function minutesToTime(totalMinutes) {
-  const normalized = ((totalMinutes % 1440) + 1440) % 1440;
-  const hh = String(Math.floor(normalized / 60)).padStart(2, '0');
-  const mm = String(normalized % 60).padStart(2, '0');
-  return `${hh}:${mm}`;
-}
-
-function makeSlotsFromRange({ date, startTime, endTime, capacity, slotMinutes }) {
-  const start = timeToMinutes(startTime);
-  const end = timeToMinutes(endTime);
-  const step = Number(slotMinutes || 60);
-  const rows = [];
-
-  for (let current = start; current + step <= end; current += step) {
-    rows.push({
-      date,
-      start_time: minutesToTime(current),
-      end_time: minutesToTime(current + step),
-      capacity: Number(capacity || 1),
-      is_active: true
-    });
-  }
-
-  return rows;
-}
-
-function isEndAfterStart(start, end) {
-  if (!start || !end) return false;
-  return timeToMinutes(end) > timeToMinutes(start);
-}
-
-function formatSlotTime(slot) {
-  if (!slot) return '';
-  return slot.end_time ? `${slot.start_time}–${slot.end_time}` : slot.start_time;
+  return (data || []).map(s => ({
+    ...s,
+    booked: booked[s.id] || 0,
+    available: Math.max(Number(s.capacity || 1) - (booked[s.id] || 0), 0)
+  })).filter(s => s.available > 0);
 }
 
 function demoSlots() {
-  const booked = JSON.parse(localStorage.getItem('timfit_demo_booked_slots') || '[]');
-  const times = ['10:00', '12:00', '15:00', '18:30', '20:00'];
-  const result = [];
-  for (let i = 0; i < 21; i += 1) {
-    const date = toISODate(addDays(new Date(), i));
-    times.forEach((time, idx) => {
-      const id = `${date}-${time}`;
-      const isBooked = booked.includes(id);
-      const weekend = [0, 6].includes(new Date(`${date}T12:00:00`).getDay());
-      if (!weekend || idx < 3) {
-        result.push({
-          id,
-          date,
-          start_time: time,
-          end_time: addMinutesToTime(time, 60),
-          available: isBooked ? 0 : 1,
-          capacity: 1,
-          isDemo: true
+  return [
+    { id:"demo-1", date:addDaysISO(1), start_time:"10:00", end_time:"11:00", capacity:1, available:1 },
+    { id:"demo-2", date:addDaysISO(1), start_time:"12:00", end_time:"13:00", capacity:1, available:1 },
+    { id:"demo-3", date:addDaysISO(2), start_time:"18:00", end_time:"19:00", capacity:1, available:1 },
+  ];
+}
+
+function Input(props){ return <input {...props} /> }
+function Select(props){ return <select {...props} /> }
+function Textarea(props){ return <textarea {...props} /> }
+function Button({children, className="", ...props}){ return <button className={"btn "+className} {...props}>{children}</button> }
+
+function PublicPage(){
+  const [slots, setSlots] = useState([]);
+  const [selectedDate, setSelectedDate] = useState("");
+  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+  const [form, setForm] = useState({ name:"", contact:"", goal:"Похудеть / подтянуть форму", format:"Очно в HITFitness", comment:"" });
+
+  const load = async () => {
+    setLoading(true); setError("");
+    try {
+      const s = await getSlots();
+      setSlots(s);
+      if (!selectedDate && s[0]) setSelectedDate(s[0].date);
+    } catch(e) {
+      setError(e.message || "Не удалось загрузить календарь");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(()=>{ load(); }, []);
+
+  const dates = [...new Set(slots.map(s=>s.date))];
+  const visibleSlots = slots.filter(s => s.date === selectedDate);
+
+  const submit = async () => {
+    if (!form.name.trim() || !form.contact.trim() || !selectedSlot) {
+      setError("Заполните имя, контакт и выберите время.");
+      return;
+    }
+    setError("");
+    const payload = {
+      slot_id: selectedSlot.id,
+      client_name: form.name.trim(),
+      contact: form.contact.trim(),
+      goal: form.goal,
+      format: form.format,
+      comment: form.comment || "",
+      status: "new"
+    };
+    try {
+      if (supabase && !String(selectedSlot.id).startsWith("demo")) {
+        const { error } = await supabase.from("booking_requests").insert(payload);
+        if (error) throw error;
+      } else {
+        const old = JSON.parse(localStorage.getItem("demo_requests") || "[]");
+        localStorage.setItem("demo_requests", JSON.stringify([payload, ...old]));
+      }
+      setSent(true);
+      await load();
+    } catch(e) {
+      setError(e.message || "Не удалось отправить заявку");
+    }
+  };
+
+  return <div className="page">
+    <div className="wrap">
+      <div className="top">
+        <div className="brand">
+          <div className="logo">T</div>
+          <div><b>Тим • HITFitness</b><span>ТРК «Лео Молл», м. Комендантский проспект</span></div>
+        </div>
+        <a className="admin-link" href="/admin">Для тренера</a>
+      </div>
+
+      <div className="hero">
+        <section className="dark">
+          <span className="badge">Бесплатный фитнес-разбор</span>
+          <h1>Начните тренировки без хаоса и ошибок</h1>
+          <p className="lead">Я персональный тренер в HITFitness. Помогаю начать с нуля, похудеть, набрать мышечную массу, поставить технику и собрать понятный план тренировок.</p>
+          <div className="grid2">
+            <div className="feature"><MapPin/><b>Очно</b><span>HITFitness, Лео Молл</span></div>
+            <div className="feature"><MessageCircle/><b>Онлайн</b><span>переписка или созвон</span></div>
+            <div className="feature"><Clock/><b>Слоты</b><span>выберите удобное время</span></div>
+            <div className="feature"><ShieldCheck/><b>Без навязывания</b><span>спокойно и по делу</span></div>
+          </div>
+        </section>
+
+        <section className="card">
+          {sent ? <div className="success">
+            <div className="check"><Check size={42}/></div>
+            <h2>Заявка отправлена</h2>
+            <p className="muted">Я напишу вам, чтобы подтвердить запись и уточнить детали.</p>
+            <Button onClick={()=>setSent(false)}>Отправить ещё одну</Button>
+          </div> : <>
+            <h2>Записаться на разбор</h2>
+            <p className="muted">Выберите дату, время и оставьте контакт.</p>
+            <div className="info"><b>Важно:</b> гостевой визит в клуб стоит 1500 ₽. Если потом оформляете абонемент, эта сумма идёт в счёт абонемента. Сам разбор от меня — бесплатно.</div>
+
+            <b>1. Выберите дату</b>
+            {loading ? <p className="muted">Загрузка...</p> : <div className="days">
+              {dates.length === 0 && <p className="muted">Пока нет свободных дат.</p>}
+              {dates.map(d => <button key={d} className={"day "+(selectedDate===d?"active":"")} onClick={()=>{setSelectedDate(d);setSelectedSlot(null)}}>{fmtDate(d)}</button>)}
+            </div>}
+
+            <b>2. Выберите промежуток времени</b>
+            <div className="slots">
+              {visibleSlots.map(s => <button key={s.id} className={"slot "+(selectedSlot?.id===s.id?"active":"")} onClick={()=>setSelectedSlot(s)}>
+                <b>{s.start_time?.slice(0,5)}–{String(s.end_time || "").slice(0,5)}</b>
+                <small>свободно: {s.available}</small>
+              </button>)}
+            </div>
+
+            <div className="form">
+              <Input placeholder="Ваше имя" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/>
+              <Input placeholder="Telegram / WhatsApp / телефон" value={form.contact} onChange={e=>setForm({...form,contact:e.target.value})}/>
+              <Select value={form.goal} onChange={e=>setForm({...form,goal:e.target.value})}>
+                <option>Похудеть / подтянуть форму</option>
+                <option>Набрать мышечную массу</option>
+                <option>Начать тренироваться с нуля</option>
+                <option>Поставить технику упражнений</option>
+                <option>Понять, почему нет результата</option>
+              </Select>
+              <Select value={form.format} onChange={e=>setForm({...form,format:e.target.value})}>
+                <option>Очно в HITFitness</option>
+                <option>Онлайн-разбор</option>
+                <option>Пока не знаю</option>
+              </Select>
+              <Textarea placeholder="Комментарий: опыт, ограничения, что сейчас не получается" value={form.comment} onChange={e=>setForm({...form,comment:e.target.value})}/>
+              <Button onClick={submit}>Отправить заявку</Button>
+            </div>
+            {error && <div className="error">{error}</div>}
+          </>}
+        </section>
+      </div>
+    </div>
+  </div>
+}
+
+function Login({onLogin}){
+  const [pass,setPass]=useState("");
+  const [err,setErr]=useState("");
+  const login=()=>{
+    if(pass===ADMIN_PASSWORD){ localStorage.setItem("timfit_admin_auth","1"); onLogin(); }
+    else setErr("Неверный пароль");
+  };
+  return <div className="login"><div className="card">
+    <h2>Вход в админку</h2>
+    <p className="muted">Введите пароль тренера.</p>
+    <div className="form">
+      <Input type="password" placeholder="Пароль" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")login()}}/>
+      <Button onClick={login}>Войти</Button>
+    </div>
+    {err && <div className="error">{err}</div>}
+    <p className="muted" style={{fontSize:13}}>Пароль по умолчанию: timfit2026. Лучше поменять через Vercel переменную VITE_ADMIN_PASSWORD.</p>
+  </div></div>
+}
+
+function Admin(){
+  const [authed,setAuthed]=useState(localStorage.getItem("timfit_admin_auth")==="1");
+  const [tab,setTab]=useState("slots");
+  const [slots,setSlots]=useState([]);
+  const [requests,setRequests]=useState([]);
+  const [error,setError]=useState("");
+  const [form,setForm]=useState({date:todayISO(),start:"10:00",end:"20:00",duration:"60",capacity:"1"});
+
+  if(!authed) return <Login onLogin={()=>setAuthed(true)}/>;
+
+  const load = async () => {
+    setError("");
+    try {
+      if (!supabase) { setError("Supabase не подключён. Проверьте Vercel variables."); return; }
+      const {data: s, error: se} = await supabase.from("booking_slots").select("*").order("date",{ascending:true}).order("start_time",{ascending:true});
+      if(se) throw se;
+      setSlots(s || []);
+      const {data: r, error: re} = await supabase.from("booking_requests").select("*, booking_slots(date,start_time,end_time)").order("created_at",{ascending:false});
+      if(re) throw re;
+      setRequests(r || []);
+    } catch(e) { setError(e.message || "Ошибка загрузки"); }
+  };
+
+  useEffect(()=>{ load(); }, []);
+
+  const addRange = async () => {
+    setError("");
+    try {
+      if(!supabase) throw new Error("Supabase не подключён");
+      const start = timeToMin(form.start);
+      const end = timeToMin(form.end);
+      const duration = Number(form.duration || 60);
+      const capacity = Number(form.capacity || 1);
+      if(end <= start) throw new Error("Время окончания должно быть позже начала");
+      const rows = [];
+      for(let t=start; t+duration<=end; t+=duration){
+        rows.push({
+          date: form.date,
+          start_time: minToTime(t),
+          end_time: minToTime(t+duration),
+          capacity,
+          is_active: true
         });
       }
-    });
-  }
-  return result;
-}
+      const {error} = await supabase.from("booking_slots").insert(rows);
+      if(error) throw error;
+      await load();
+    } catch(e) { setError(e.message || "Не удалось добавить слоты"); }
+  };
 
-async function loadAvailableSlots() {
-  if (!supabase) return { data: demoSlots(), error: null, isDemo: true };
-  const from = toISODate(new Date());
-  const to = toISODate(addDays(new Date(), 35));
-  const { data, error } = await supabase
-    .from('available_slots')
-    .select('*')
-    .gte('date', from)
-    .lte('date', to)
-    .order('date', { ascending: true })
-    .order('start_time', { ascending: true });
-  return { data: data || [], error, isDemo: false };
-}
+  const closeSlot = async (id) => {
+    if(!confirm("Закрыть слот? Он пропадёт у клиента, но останется в базе.")) return;
+    const {error} = await supabase.from("booking_slots").update({is_active:false}).eq("id", id);
+    if(error) setError(error.message); else load();
+  };
 
-async function bookSlot({ slot, form }) {
-  if (!slot) return { error: { message: 'Выберите дату и время.' } };
+  const deleteSlot = async (id) => {
+    if(!confirm("Удалить слот полностью?")) return;
+    const {error} = await supabase.from("booking_slots").delete().eq("id", id);
+    if(error) setError(error.message); else load();
+  };
 
-  if (!supabase || slot.isDemo) {
-    const booked = JSON.parse(localStorage.getItem('timfit_demo_booked_slots') || '[]');
-    if (booked.includes(slot.id)) return { error: { message: 'Это время уже заняли. Выберите другое.' } };
-    localStorage.setItem('timfit_demo_booked_slots', JSON.stringify([...booked, slot.id]));
-    return { data: { ok: true, demo: true }, error: null };
-  }
+  const logout = () => { localStorage.removeItem("timfit_admin_auth"); setAuthed(false); };
 
-  const { data, error } = await supabase.rpc('create_booking', {
-    p_slot_id: slot.id,
-    p_client_name: form.name,
-    p_contact: form.contact,
-    p_goal: form.goal,
-    p_format: form.format,
-    p_comment: form.comment || ''
-  });
-
-  return { data, error };
-}
-
-function Button({ children, variant = 'dark', ...props }) {
-  return <button className={`btn ${variant}`} {...props}>{children}</button>;
-}
-
-function Card({ children, className = '' }) {
-  return <section className={`card ${className}`}>{children}</section>;
-}
-
-function Input(props) {
-  return <input className="input" {...props} />;
-}
-
-function Select(props) {
-  return <select className="input" {...props} />;
-}
-
-function Textarea(props) {
-  return <textarea className="input textarea" {...props} />;
-}
-
-function Sidebar({ tab, setTab }) {
-  return (
+  return <div className="admin">
     <aside className="sidebar">
-      <div className="brand">
-        <div className="brandIcon">T</div>
-        <div>
-          <b>TimFit CRM</b>
-          <span>тренер + клиенты</span>
-        </div>
-      </div>
-      <nav>
-        {tabs.map(([id, label]) => (
-          <button key={id} onClick={() => setTab(id)} className={tab === id ? 'active' : ''}>{label}</button>
-        ))}
-      </nav>
-      <div className="safeBox">
-        <b>Безопасный режим</b>
-        <p>Приложение готовит тексты и напоминания, а отправку подтверждает тренер.</p>
+      <div className="sidebrand"><div className="logo">T</div><div><b>TimFit CRM</b><br/><span>тренер + клиенты</span></div></div>
+      <div className="nav">
+        <button className={tab==="slots"?"active":""} onClick={()=>setTab("slots")}>Слоты</button>
+        <button className={tab==="requests"?"active":""} onClick={()=>setTab("requests")}>Заявки</button>
+        <button onClick={logout}>Выйти</button>
       </div>
     </aside>
-  );
-}
-
-function Header({ trainer }) {
-  return (
-    <header className="header">
-      <div>
-        <p className="eyebrow">{trainer.club} • {trainer.location}</p>
-        <h1>Приложение для тренера и клиентов</h1>
-        <p>CRM, заявки, запись, шаблоны, площадки и почти автоматические follow-up сообщения.</p>
+    <main className="main">
+      <div className="admin-head">
+        <div>
+          <h1 style={{fontSize:36,margin:0}}>Админка TimFit</h1>
+          <p className="muted">Управление календарём и заявками.</p>
+        </div>
+        <a className="admin-link" href="/" target="_blank">Открыть клиентскую страницу</a>
       </div>
-    </header>
-  );
-}
 
-function Stat({ label, value, sub }) {
-  return (
-    <Card className="stat">
-      <p>{label}</p>
-      <strong>{value}</strong>
-      <span>{sub}</span>
-    </Card>
-  );
-}
-
-function Dashboard({ leads, platforms, outbox, bookings, setTab }) {
-  return (
-    <div className="page">
       <div className="stats">
-        <Stat label="Лиды" value={leads.length} sub="в базе" />
-        <Stat label="Записи" value={bookings.length} sub="разборы и тренировки" />
-        <Stat label="Очередь" value={outbox.length} sub="на подтверждение" />
-        <Stat label="Площадки" value={platforms.length} sub="для продвижения" />
+        <div className="stat"><span className="muted">Всего слотов</span><b>{slots.length}</b></div>
+        <div className="stat"><span className="muted">Активных</span><b>{slots.filter(s=>s.is_active).length}</b></div>
+        <div className="stat"><span className="muted">Заявок</span><b>{requests.length}</b></div>
       </div>
 
-      <div className="grid two">
-        <Card>
-          <div className="sectionHead">
-            <div>
-              <h2>План на сегодня</h2>
-              <p>Минимум действий, которые дают поток заявок.</p>
-            </div>
-            <Button variant="light" onClick={() => setTab('messages')}>Открыть очередь</Button>
-          </div>
-          <div className="checkGrid">
-            {[
-              'Проверить ответы и создать карточки лидов',
-              'Подтвердить сообщения в очереди',
-              'Опубликовать 1 полезный пост',
-              'Назначить время тем, кто написал «РАЗБОР»',
-              'Сделать follow-up тем, кто молчит больше 24 часов',
-              'Обновить результаты по площадкам'
-            ].map((item) => <div className="check" key={item}>✓ {item}</div>)}
-          </div>
-        </Card>
-
-        <Card className="funnel">
-          <h2>Воронка клиента</h2>
-          {['Пост / чат', 'Сообщение «РАЗБОР»', 'Консультация', 'Первая тренировка', 'Пакет 8–12 тренировок'].map((s, i) => (
-            <div key={s} className="step"><span>{i + 1}</span>{s}</div>
-          ))}
-        </Card>
-      </div>
-
-      <Card>
-        <h2>Ближайшие записи</h2>
-        <div className="cardsList">
-          {bookings.map((b) => (
-            <div className="row" key={b.id}>
-              <div><b>{b.client}</b><p>{b.type} • {b.date}, {b.time}</p></div>
-              <em>{b.status}</em>
-            </div>
-          ))}
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-function Leads({ leads, setLeads }) {
-  const [form, setForm] = useState({ name: '', source: '', goal: '', format: 'Очно', notes: '' });
-  const [q, setQ] = useState('');
-  const filtered = leads.filter((l) => Object.values(l).join(' ').toLowerCase().includes(q.toLowerCase()));
-
-  function addLead() {
-    if (!form.name.trim()) return;
-    setLeads([{ id: Date.now(), ...form, status: 'Новый лид', nextStep: 'Ответить и уточнить формат', followUp: 'Сегодня' }, ...leads]);
-    setForm({ name: '', source: '', goal: '', format: 'Очно', notes: '' });
-  }
-  function updateLead(id, patch) {
-    setLeads(leads.map((l) => l.id === id ? { ...l, ...patch } : l));
-  }
-
-  return (
-    <div className="grid three">
-      <Card>
-        <h2>Новый лид</h2>
-        <p>Записывай каждого, кто написал «РАЗБОР».</p>
-        <div className="form">
-          <Input placeholder="Имя" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <Input placeholder="Источник" value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} />
-          <Input placeholder="Цель клиента" value={form.goal} onChange={(e) => setForm({ ...form, goal: e.target.value })} />
-          <Select value={form.format} onChange={(e) => setForm({ ...form, format: e.target.value })}>
-            <option>Очно</option><option>Онлайн</option><option>Не выбрал</option>
-          </Select>
-          <Textarea placeholder="Заметки" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-          <Button onClick={addLead}>Добавить</Button>
-        </div>
-      </Card>
-      <Card className="wide">
-        <div className="sectionHead"><h2>База лидов</h2><Input placeholder="Поиск" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-        <div className="cardsList">
-          {filtered.map((lead) => (
-            <div className="lead" key={lead.id}>
-              <div>
-                <h3>{lead.name}</h3>
-                <p>{lead.source} • {lead.format}</p>
-                <p><b>Цель:</b> {lead.goal || 'не указана'}</p>
-                <p><b>Шаг:</b> {lead.nextStep}</p>
-              </div>
-              <div className="leadControls">
-                <Select value={lead.status} onChange={(e) => updateLead(lead.id, { status: e.target.value })}>{statuses.map((s) => <option key={s}>{s}</option>)}</Select>
-                <Input value={lead.followUp} onChange={(e) => updateLead(lead.id, { followUp: e.target.value })} />
-              </div>
-            </div>
-          ))}
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-function Messages({ templates, outbox, setOutbox }) {
-  const [templateId, setTemplateId] = useState(2);
-  const template = templates.find((t) => t.id === Number(templateId)) || templates[0];
-  const [draft, setDraft] = useState(template?.text || '');
-  useEffect(() => setDraft(template?.text || ''), [templateId]);
-
-  function addToQueue() {
-    setOutbox([{ id: Date.now(), channel: 'Ручная отправка', title: template.title, status: 'Ожидает подтверждения', scheduled: 'Сейчас', text: draft }, ...outbox]);
-  }
-  function approve(id) {
-    setOutbox(outbox.map((m) => m.id === id ? { ...m, status: 'Подтверждено' } : m));
-  }
-
-  return (
-    <div className="grid two">
-      <Card>
-        <h2>Помощник переписки</h2>
-        <p>Выбери шаблон, поправь и добавь в очередь.</p>
-        <div className="form">
-          <Select value={templateId} onChange={(e) => setTemplateId(e.target.value)}>{templates.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}</Select>
-          <Textarea value={draft} onChange={(e) => setDraft(e.target.value)} />
-          <div className="hint">Подсказка: сначала спроси формат — очно в HITFitness или онлайн.</div>
-          <Button onClick={addToQueue}>Добавить в очередь</Button>
-        </div>
-      </Card>
-      <Card>
-        <h2>Очередь отправки</h2>
-        <p>Приложение готовит, тренер подтверждает.</p>
-        <div className="cardsList">
-          {outbox.map((m) => (
-            <div className="row" key={m.id}>
-              <div><b>{m.title}</b><p>{m.channel} • {m.scheduled}</p><em>{m.status}</em></div>
-              <Button variant="gold" disabled={m.status === 'Подтверждено'} onClick={() => approve(m.id)}>Подтвердить</Button>
-            </div>
-          ))}
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-function CalendarPage({ bookings, setBookings, leads }) {
-  const [form, setForm] = useState({ client: '', type: 'Очный разбор', date: 'Сегодня', time: '19:00' });
-  const [cloudSlots, setCloudSlots] = useState([]);
-  const [slotForm, setSlotForm] = useState({ date: toISODate(new Date()), start_time: '10:00', end_time: '20:00', slotMinutes: 60, capacity: 1 });
-  const [cloudMessage, setCloudMessage] = useState('');
-
-  async function refreshCloudSlots() {
-    const { data } = await loadAvailableSlots();
-    setCloudSlots(data || []);
-  }
-
-  useEffect(() => {
-    refreshCloudSlots();
-  }, []);
-
-  function addBooking() {
-    if (!form.client.trim()) return;
-    setBookings([{ id: Date.now(), ...form, status: 'Ожидает подтверждения' }, ...bookings]);
-    setForm({ client: '', type: 'Очный разбор', date: 'Сегодня', time: '19:00' });
-  }
-
-  async function addCloudSlot() {
-    setCloudMessage('');
-    if (!supabase) {
-      setCloudMessage('Для общего календаря нужно подключить Supabase. Пока это демо-режим.');
-      return;
-    }
-    if (!isEndAfterStart(slotForm.start_time, slotForm.end_time)) {
-      setCloudMessage('Укажи корректный промежуток: время «до» должно быть позже времени «с».');
-      return;
-    }
-
-    const rows = makeSlotsFromRange({
-      date: slotForm.date,
-      startTime: slotForm.start_time,
-      endTime: slotForm.end_time,
-      capacity: slotForm.capacity,
-      slotMinutes: slotForm.slotMinutes
-    });
-
-    if (!rows.length) {
-      setCloudMessage('Промежуток слишком короткий. Увеличь время «до» или уменьши длительность слота.');
-      return;
-    }
-
-    const { error } = await supabase
-      .from('booking_slots')
-      .upsert(rows, { onConflict: 'date,start_time', ignoreDuplicates: true });
-
-    if (error) {
-      setCloudMessage(`Ошибка: ${error.message}. Проверьте политики Supabase или добавьте слоты через таблицу booking_slots.`);
-      return;
-    }
-    setCloudMessage(`Готово: создан диапазон ${slotForm.start_time}–${slotForm.end_time}. Клиент увидит отдельные слоты по ${slotForm.slotMinutes} минут.`);
-    await refreshCloudSlots();
-  }
-
-  const visibleSlots = (cloudSlots || []).slice(0, 20);
-
-  return (
-    <div className="page">
-      <div className="grid three">
-        <Card>
-          <h2>Слоты для клиентской страницы</h2>
-          <p>Создай диапазон — клиент увидит отдельные свободные слоты внутри этого промежутка.</p>
+      {tab==="slots" && <div className="cards">
+        <section className="card">
+          <h2>Добавить диапазон</h2>
+          <p className="muted">Например: с 10:00 до 20:00, по 60 минут — клиент увидит отдельные слоты.</p>
           <div className="form">
-            <label className="fieldLabel">Дата<Input type="date" value={slotForm.date} onChange={(e) => setSlotForm({ ...slotForm, date: e.target.value })} /></label>
-            <label className="fieldLabel">С какого времени<Input type="time" value={slotForm.start_time} onChange={(e) => setSlotForm({ ...slotForm, start_time: e.target.value, end_time: isEndAfterStart(e.target.value, slotForm.end_time) ? slotForm.end_time : addMinutesToTime(e.target.value, 60) })} /></label>
-            <label className="fieldLabel">До какого времени<Input type="time" value={slotForm.end_time} onChange={(e) => setSlotForm({ ...slotForm, end_time: e.target.value })} /></label>
-            <label className="fieldLabel">Длительность одного слота, мин<Input type="number" min="30" step="30" max="180" value={slotForm.slotMinutes} onChange={(e) => setSlotForm({ ...slotForm, slotMinutes: e.target.value })} /></label>
-            <label className="fieldLabel">Количество мест на каждый слот<Input type="number" min="1" max="5" value={slotForm.capacity} onChange={(e) => setSlotForm({ ...slotForm, capacity: e.target.value })} /></label>
-            <Button onClick={addCloudSlot}>Разбить диапазон на слоты</Button>
+            <label><b>Дата</b><Input type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/></label>
+            <label><b>С какого времени</b><Input type="time" value={form.start} onChange={e=>setForm({...form,start:e.target.value})}/></label>
+            <label><b>До какого времени</b><Input type="time" value={form.end} onChange={e=>setForm({...form,end:e.target.value})}/></label>
+            <label><b>Длительность слота, минут</b><Input type="number" min="15" step="15" value={form.duration} onChange={e=>setForm({...form,duration:e.target.value})}/></label>
+            <label><b>Количество мест на каждый слот</b><Input type="number" min="1" value={form.capacity} onChange={e=>setForm({...form,capacity:e.target.value})}/></label>
+            <Button onClick={addRange}>Добавить промежуток</Button>
           </div>
-          {cloudMessage && <div className="hint">{cloudMessage}</div>}
-          {!supabase && <div className="hint">Supabase не подключен. Клиентская страница показывает демо-слоты, но они не общие для всех.</div>}
-        </Card>
+          {error && <div className="error">{error}</div>}
+        </section>
 
-        <Card className="wide">
+        <section className="card">
           <h2>Свободные места в базе</h2>
-          <div className="tileGrid">
-            {visibleSlots.map((slot) => (
-              <div className="tile" key={slot.id}>
-                <b>{formatHumanDate(slot.date)}</b>
-                <p>{formatSlotTime(slot)}</p>
-                <strong>{Number(slot.available ?? 0) > 0 ? `Свободно: ${slot.available}` : 'Занято'}</strong>
-                <em>{slot.isDemo ? 'демо' : 'база'}</em>
+          <p className="muted">Закрыть — скрыть от клиента. Удалить — убрать полностью.</p>
+          <div className="slot-list">
+            {slots.map(s=><div className="slot-row" key={s.id}>
+              <div>
+                <b>{fmtDate(s.date)}</b>
+                <p className="muted">{s.start_time?.slice(0,5)}–{String(s.end_time || "").slice(0,5)} • мест: {s.capacity} • {s.is_active ? "активен" : "закрыт"}</p>
               </div>
-            ))}
+              <div className="actions">
+                {s.is_active && <button className="btn small soft" onClick={()=>closeSlot(s.id)}>Закрыть</button>}
+                <button className="btn small red" onClick={()=>deleteSlot(s.id)}>Удалить</button>
+              </div>
+            </div>)}
           </div>
-        </Card>
-      </div>
+        </section>
+      </div>}
 
-      <div className="grid three">
-        <Card>
-          <h2>Ручная запись в CRM</h2>
-          <div className="form">
-            <Input list="leadNames" placeholder="Имя клиента" value={form.client} onChange={(e) => setForm({ ...form, client: e.target.value })} />
-            <datalist id="leadNames">{leads.map((l) => <option key={l.id} value={l.name} />)}</datalist>
-            <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-              <option>Очный разбор</option><option>Онлайн-разбор</option><option>Первая тренировка</option><option>Персональная тренировка</option>
-            </Select>
-            <Input value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-            <Input value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} />
-            <Button onClick={addBooking}>Записать</Button>
-          </div>
-        </Card>
-        <Card className="wide">
-          <h2>Локальное расписание CRM</h2>
-          <div className="tileGrid">{bookings.map((b) => <div className="tile" key={b.id}><b>{b.client}</b><p>{b.type}</p><strong>{b.date} • {b.time}</strong><em>{b.status}</em></div>)}</div>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function Platforms({ platforms, setPlatforms }) {
-  const [form, setForm] = useState({ name: '', type: 'Telegram', district: '', rules: '', status: 'Можно публиковать' });
-  function addPlatform() {
-    if (!form.name.trim()) return;
-    setPlatforms([{ id: Date.now(), ...form, lastPost: '—', result: '—' }, ...platforms]);
-    setForm({ name: '', type: 'Telegram', district: '', rules: '', status: 'Можно публиковать' });
-  }
-  return (
-    <div className="grid three">
-      <Card>
-        <h2>Добавить площадку</h2>
-        <div className="form">
-          <Input placeholder="Название" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>{['Telegram','VK','Instagram','WhatsApp','Авито','Яндекс Услуги','Профи.ру','YouDo','Форум'].map(x => <option key={x}>{x}</option>)}</Select>
-          <Input placeholder="Район" value={form.district} onChange={(e) => setForm({ ...form, district: e.target.value })} />
-          <Input placeholder="Правила" value={form.rules} onChange={(e) => setForm({ ...form, rules: e.target.value })} />
-          <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>{['Можно публиковать','Нужно согласование','Платная реклама','Публикация запрещена','Тестируется'].map(x => <option key={x}>{x}</option>)}</Select>
-          <Button onClick={addPlatform}>Добавить</Button>
-        </div>
-      </Card>
-      <Card className="wide"><h2>Площадки продвижения</h2><div className="cardsList">{platforms.map((p) => <div className="row" key={p.id}><div><b>{p.name}</b><p>{p.type} • {p.district}</p><p>{p.rules}</p></div><em>{p.status}</em></div>)}</div></Card>
-    </div>
-  );
-}
-
-function Templates({ templates, setTemplates }) {
-  const [form, setForm] = useState({ title: '', type: 'Публикация', text: '' });
-  function addTemplate() {
-    if (!form.title.trim() || !form.text.trim()) return;
-    setTemplates([{ id: Date.now(), ...form }, ...templates]);
-    setForm({ title: '', type: 'Публикация', text: '' });
-  }
-  return (
-    <div className="grid three">
-      <Card><h2>Новый шаблон</h2><div className="form"><Input placeholder="Название" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /><Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>{['Публикация','Личное сообщение','Follow-up','Сообщение админу','Ответ на цену'].map(x => <option key={x}>{x}</option>)}</Select><Textarea placeholder="Текст" value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} /><Button onClick={addTemplate}>Сохранить</Button></div></Card>
-      <Card className="wide"><h2>База шаблонов</h2><div className="cardsList">{templates.map((t) => <div className="template" key={t.id}><div><b>{t.title}</b><em>{t.type}</em></div><p>{t.text}</p></div>)}</div></Card>
-    </div>
-  );
-}
-
-function ClientForm({ setLeads }) {
-  const [sent, setSent] = useState(false);
-  const [form, setForm] = useState({ name: '', contact: '', goal: '', format: 'Очно', experience: '', limits: '' });
-  function submit() {
-    if (!form.name.trim()) return;
-    setLeads((prev) => [{ id: Date.now(), name: form.name, source: 'Анкета клиента', goal: form.goal, format: form.format, status: 'Новый лид', nextStep: 'Ответить по анкете', followUp: 'Сегодня', notes: `Контакт: ${form.contact}. Опыт: ${form.experience}. Ограничения: ${form.limits}` }, ...prev]);
-    setSent(true);
-  }
-  if (sent) return <Card className="center"><h2>Заявка создана</h2><p>Она появилась в разделе «Лиды».</p><Button onClick={() => setSent(false)}>Создать ещё одну</Button></Card>;
-  return <Card className="clientForm"><h2>Анкета клиента</h2><p>Форма для записи на фитнес-разбор.</p><div className="form"><Input placeholder="Имя" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /><Input placeholder="Телефон / Telegram / WhatsApp" value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} /><Input placeholder="Цель" value={form.goal} onChange={(e) => setForm({ ...form, goal: e.target.value })} /><Select value={form.format} onChange={(e) => setForm({ ...form, format: e.target.value })}><option>Очно</option><option>Онлайн</option><option>Пока не знаю</option></Select><Input placeholder="Опыт тренировок" value={form.experience} onChange={(e) => setForm({ ...form, experience: e.target.value })} /><Input placeholder="Травмы / ограничения" value={form.limits} onChange={(e) => setForm({ ...form, limits: e.target.value })} /><Button onClick={submit}>Отправить заявку</Button></div></Card>;
-}
-
-function Analytics({ leads, platforms, outbox, bookings }) {
-  const data = statuses.map((s) => ({ status: s, count: leads.filter((l) => l.status === s).length })).filter((x) => x.count);
-  const max = Math.max(...data.map((x) => x.count), 1);
-  return <div className="page"><div className="stats"><Stat label="Всего лидов" value={leads.length} /><Stat label="Записи" value={bookings.length} /><Stat label="Очередь" value={outbox.length} /><Stat label="Площадки" value={platforms.length} /></div><Card><h2>Статусы лидов</h2>{data.map((x) => <div className="barRow" key={x.status}><span>{x.status}</span><b>{x.count}</b><div><i style={{ width: `${(x.count / max) * 100}%` }} /></div></div>)}</Card></div>;
-}
-
-function Profile({ trainer, setTrainer }) {
-  function onFile(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setTrainer({ ...trainer, photo: URL.createObjectURL(file) });
-  }
-  return <div className="grid three"><Card><h2>Фото тренера</h2><div className="photoBox">{trainer.photo ? <img src={trainer.photo} alt="trainer" /> : <span>Загрузи фото</span>}</div><label className="upload"><input type="file" accept="image/*" onChange={onFile} />Загрузить фото</label></Card><Card className="wide"><h2>Профиль</h2><div className="form twoCols"><Input value={trainer.name} onChange={(e) => setTrainer({ ...trainer, name: e.target.value })} /><Input value={trainer.role} onChange={(e) => setTrainer({ ...trainer, role: e.target.value })} /><Input value={trainer.club} onChange={(e) => setTrainer({ ...trainer, club: e.target.value })} /><Input value={trainer.location} onChange={(e) => setTrainer({ ...trainer, location: e.target.value })} /><Input value={trainer.formats} onChange={(e) => setTrainer({ ...trainer, formats: e.target.value })} /><Input value={trainer.offer} onChange={(e) => setTrainer({ ...trainer, offer: e.target.value })} /></div><div className="hint"><b>Описание:</b> {trainer.name} — {trainer.role.toLowerCase()} в {trainer.club}. Локация: {trainer.location}. Форматы: {trainer.formats}. Оффер: {trainer.offer}.</div></Card></div>;
-}
-
-
-
-function PublicLanding() {
-  const [sent, setSent] = useState(false);
-  const [slots, setSlots] = useState([]);
-  const [slotsLoading, setSlotsLoading] = useState(true);
-  const [slotsError, setSlotsError] = useState('');
-  const [selectedDate, setSelectedDate] = useState('');
-  const [selectedSlotId, setSelectedSlotId] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({
-    name: '',
-    contact: '',
-    goal: 'Похудеть / подтянуть форму',
-    format: 'Очно в HITFitness',
-    comment: ''
-  });
-
-  async function refreshSlots() {
-    setSlotsLoading(true);
-    setSlotsError('');
-    const { data, error, isDemo } = await loadAvailableSlots();
-    if (error) {
-      setSlotsError('Не удалось загрузить расписание. Попробуйте позже или напишите Тимy напрямую.');
-      setSlots([]);
-    } else {
-      const normalized = (data || []).map((slot) => ({
-        ...slot,
-        available: Number(slot.available ?? slot.available_count ?? slot.capacity ?? 0),
-        isDemo: Boolean(isDemo || slot.isDemo)
-      }));
-      setSlots(normalized);
-      const firstAvailable = normalized.find((slot) => Number(slot.available) > 0);
-      if (firstAvailable && !selectedDate) {
-        setSelectedDate(firstAvailable.date);
-        setSelectedSlotId(firstAvailable.id);
-      }
-    }
-    setSlotsLoading(false);
-  }
-
-  useEffect(() => {
-    refreshSlots();
-  }, []);
-
-  const slotsByDate = useMemo(() => {
-    return slots.reduce((acc, slot) => {
-      if (!acc[slot.date]) acc[slot.date] = [];
-      acc[slot.date].push(slot);
-      return acc;
-    }, {});
-  }, [slots]);
-
-  const calendarDays = useMemo(() => {
-    return Array.from({ length: 21 }, (_, i) => {
-      const date = toISODate(addDays(new Date(), i));
-      const daySlots = slotsByDate[date] || [];
-      const available = daySlots.reduce((sum, slot) => sum + Number(slot.available || 0), 0);
-      return { date, available };
-    });
-  }, [slotsByDate]);
-
-  const selectedSlots = slotsByDate[selectedDate] || [];
-  const selectedSlot = slots.find((slot) => String(slot.id) === String(selectedSlotId));
-
-  async function submit() {
-    if (!form.name.trim() || !form.contact.trim() || !selectedSlot) return;
-    setSubmitting(true);
-    setSlotsError('');
-
-    const { error } = await bookSlot({ slot: selectedSlot, form });
-
-    if (error) {
-      setSlotsError(error.message || 'Это время уже занято. Выберите другой слот.');
-      await refreshSlots();
-      setSubmitting(false);
-      return;
-    }
-
-    const lead = {
-      id: Date.now(),
-      name: form.name,
-      source: 'Страница записи',
-      goal: form.goal,
-      format: form.format.includes('Очно') ? 'Очно' : form.format.includes('Онлайн') ? 'Онлайн' : 'Не выбрал',
-      status: 'Новый лид',
-      nextStep: 'Подтвердить запись и написать клиенту',
-      followUp: 'Сегодня',
-      notes: `Контакт: ${form.contact}. Дата: ${formatHumanDate(selectedSlot.date)}. Время: ${formatSlotTime(selectedSlot)}. Комментарий: ${form.comment || '—'}`,
-      createdAt: new Date().toLocaleString('ru-RU')
-    };
-
-    try {
-      const saved = JSON.parse(localStorage.getItem('timfit_leads') || '[]');
-      localStorage.setItem('timfit_leads', JSON.stringify([lead, ...saved]));
-      window.dispatchEvent(new Event('storage'));
-    } catch {}
-
-    await refreshSlots();
-    setSubmitting(false);
-    setSent(true);
-  }
-
-  return (
-    <div className="publicPage">
-      <div className="publicWrap">
-        <div className="publicTop">
-          <div className="publicBrand">
-            <div className="brandIcon">T</div>
+      {tab==="requests" && <section className="card">
+        <h2>Заявки клиентов</h2>
+        <div className="request-list">
+          {requests.map(r=><div className="request-row" key={r.id}>
             <div>
-              <b>Тим • HITFitness</b>
-              <span>ТРК «Лео Молл», м. Комендантский проспект</span>
+              <b>{r.client_name}</b>
+              <p className="muted">{r.contact}</p>
+              <p><b>Цель:</b> {r.goal}</p>
+              <p><b>Формат:</b> {r.format}</p>
+              <p><b>Время:</b> {r.booking_slots?.date ? `${fmtDate(r.booking_slots.date)}, ${r.booking_slots.start_time?.slice(0,5)}–${String(r.booking_slots.end_time || "").slice(0,5)}` : "слот удалён"}</p>
+              {r.comment && <p><b>Комментарий:</b> {r.comment}</p>}
             </div>
-          </div>
-          <a className="adminLink" href="/admin">Для тренера</a>
+            <span className="day">{r.status}</span>
+          </div>)}
         </div>
-
-        <div className="publicHero">
-          <section className="heroCard">
-            <span className="badge">Бесплатный фитнес-разбор</span>
-            <h1>Выберите удобную дату и запишитесь на разбор</h1>
-            <p>
-              Меня зовут Тим. Я персональный тренер в HITFitness. Помогаю начать с нуля,
-              похудеть, набрать мышечную массу, поставить технику и собрать понятный план тренировок.
-            </p>
-            <div className="heroGrid">
-              <div><b>Очно</b><span>HITFitness, Лео Молл</span></div>
-              <div><b>Онлайн</b><span>переписка или созвон</span></div>
-              <div><b>Календарь</b><span>видны только свободные места</span></div>
-              <div><b>Без давления</b><span>спокойно и по делу</span></div>
-            </div>
-          </section>
-
-          <Card className="publicFormCard">
-            {sent ? (
-              <div className="successBox">
-                <div className="successIcon">✓</div>
-                <h2>Заявка отправлена</h2>
-                <p>Тим увидит заявку и напишет, чтобы подтвердить выбранные дату и время.</p>
-                <Button onClick={() => setSent(false)}>Записаться ещё раз</Button>
-              </div>
-            ) : (
-              <>
-                <h2>Записаться на разбор</h2>
-                <p>Выберите свободную дату и время. Если слот занят, он будет недоступен.</p>
-                <div className="guestNotice">
-                  <b>Важно для очного формата:</b> гостевой визит в клуб стоит 1500 ₽. Если потом оформляете абонемент, эта сумма идёт в счёт абонемента. Сам разбор от меня — бесплатно.
-                </div>
-                {supabaseConfigError && (
-                  <div className="errorNotice">
-                    Ошибка подключения Supabase: {supabaseConfigError}. Проверьте VITE_SUPABASE_URL и VITE_SUPABASE_ANON_KEY в Vercel.
-                  </div>
-                )}
-                {!supabase && (
-                  <div className="demoNotice">
-                    Сейчас календарь работает в демо-режиме. После подключения Supabase свободные места будут синхронизироваться между всеми клиентами.
-                  </div>
-                )}
-                {slotsError && <div className="errorNotice">{slotsError}</div>}
-
-                <div className="bookingCalendar">
-                  <h3>1. Выберите день</h3>
-                  {slotsLoading ? (
-                    <div className="loadingSlots">Загружаю свободные места...</div>
-                  ) : (
-                    <div className="dateGrid">
-                      {calendarDays.map((day) => (
-                        <button
-                          key={day.date}
-                          type="button"
-                          disabled={!day.available}
-                          onClick={() => {
-                            setSelectedDate(day.date);
-                            const first = (slotsByDate[day.date] || []).find((slot) => Number(slot.available) > 0);
-                            setSelectedSlotId(first?.id || '');
-                          }}
-                          className={selectedDate === day.date ? 'active' : ''}
-                        >
-                          <b>{formatHumanDate(day.date)}</b>
-                          <span>{day.available ? `${day.available} мест` : 'нет мест'}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  <h3>2. Выберите промежуток времени</h3>
-                  <div className="slotGrid">
-                    {selectedSlots.length ? selectedSlots.map((slot) => {
-                      const available = Number(slot.available || 0);
-                      return (
-                        <button
-                          key={slot.id}
-                          type="button"
-                          disabled={!available}
-                          onClick={() => setSelectedSlotId(slot.id)}
-                          className={String(selectedSlotId) === String(slot.id) ? 'active' : ''}
-                        >
-                          <b>{formatSlotTime(slot)}</b>
-                          <span>{available ? `свободно: ${available}` : 'занято'}</span>
-                        </button>
-                      );
-                    }) : <p className="emptySlots">Выберите день со свободными местами.</p>}
-                  </div>
-                </div>
-
-                <div className="form">
-                  <Input placeholder="Ваше имя" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-                  <Input placeholder="Telegram / WhatsApp / телефон" value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} />
-                  <Select value={form.goal} onChange={(e) => setForm({ ...form, goal: e.target.value })}>
-                    <option>Похудеть / подтянуть форму</option>
-                    <option>Набрать мышечную массу</option>
-                    <option>Начать тренироваться с нуля</option>
-                    <option>Поставить технику упражнений</option>
-                    <option>Понять, почему нет результата</option>
-                    <option>Другое</option>
-                  </Select>
-                  <Select value={form.format} onChange={(e) => setForm({ ...form, format: e.target.value })}>
-                    <option>Очно в HITFitness</option>
-                    <option>Онлайн-разбор</option>
-                    <option>Пока не знаю</option>
-                  </Select>
-                  <Textarea placeholder="Комментарий: опыт, ограничения, что сейчас не получается" value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} />
-                  <Button onClick={submit} disabled={submitting || !selectedSlot || !form.name.trim() || !form.contact.trim()}>
-                    {submitting ? 'Отправляю...' : 'Забронировать время'}
-                  </Button>
-                </div>
-              </>
-            )}
-          </Card>
-        </div>
-
-        <div className="publicInfo">
-          <Card><h2>Что входит</h2><p>Разберём цель, текущую ситуацию, ошибки и план на ближайший месяц.</p></Card>
-          <Card><h2>Кому подойдёт</h2><p>Новичкам, тем, кто давно не тренировался, или тем, кто ходит в зал без результата.</p></Card>
-          <Card><h2>Что дальше</h2><p>После заявки я напишу и подтвержу выбранное время.</p></Card>
-        </div>
-      </div>
-    </div>
-  );
+      </section>}
+    </main>
+  </div>
 }
 
-
-class ErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { error: null };
-  }
-
-  static getDerivedStateFromError(error) {
-    return { error };
-  }
-
-  render() {
-    if (this.state.error) {
-      return (
-        <div className="publicPage">
-          <div className="publicWrap">
-            <div className="errorNotice">
-              <b>Ошибка загрузки страницы.</b><br />
-              {String(this.state.error?.message || this.state.error)}
-            </div>
-          </div>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
+function App(){
+  return window.location.pathname === "/admin" ? <Admin/> : <PublicPage/>;
 }
 
-function App() {
-  const [tab, setTab] = useState('dashboard');
-  const [trainer, setTrainer] = useStorage('timfit_trainer', defaultTrainer);
-  const [leads, setLeads] = useStorage('timfit_leads', defaultLeads);
-  const [platforms, setPlatforms] = useStorage('timfit_platforms', defaultPlatforms);
-  const [templates, setTemplates] = useStorage('timfit_templates', defaultTemplates);
-  const [outbox, setOutbox] = useStorage('timfit_outbox', defaultOutbox);
-  const [bookings, setBookings] = useStorage('timfit_bookings', defaultBookings);
-
-  const isAdmin = window.location.pathname.startsWith('/admin');
-
-  if (!isAdmin) {
-    return <PublicLanding />;
-  }
-
-  const view = useMemo(() => {
-    switch (tab) {
-      case 'leads': return <Leads leads={leads} setLeads={setLeads} />;
-      case 'messages': return <Messages templates={templates} outbox={outbox} setOutbox={setOutbox} />;
-      case 'calendar': return <CalendarPage bookings={bookings} setBookings={setBookings} leads={leads} />;
-      case 'platforms': return <Platforms platforms={platforms} setPlatforms={setPlatforms} />;
-      case 'templates': return <Templates templates={templates} setTemplates={setTemplates} />;
-      case 'client': return <ClientForm setLeads={setLeads} />;
-      case 'analytics': return <Analytics leads={leads} platforms={platforms} outbox={outbox} bookings={bookings} />;
-      case 'profile': return <Profile trainer={trainer} setTrainer={setTrainer} />;
-      default: return <Dashboard leads={leads} platforms={platforms} outbox={outbox} bookings={bookings} setTab={setTab} />;
-    }
-  }, [tab, trainer, leads, platforms, templates, outbox, bookings]);
-
-  return (
-    <div className="app">
-      <Sidebar tab={tab} setTab={setTab} />
-      <main>
-        <div className="mobileTabs">{tabs.map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={tab === id ? 'active' : ''}>{label}</button>)}</div>
-        <div className="content">
-          <Header trainer={trainer} />
-          <div className="notice"><b>Почти автоматизация:</b> приложение готовит тексты, лиды, напоминания и очередь сообщений, но публикацию подтверждает тренер. <a href="/" target="_blank">Открыть страницу клиента</a></div>
-          {view}
-        </div>
-      </main>
-    </div>
-  );
-}
-
-createRoot(document.getElementById('root')).render(<ErrorBoundary><App /></ErrorBoundary>);
+createRoot(document.getElementById("root")).render(<App/>);
