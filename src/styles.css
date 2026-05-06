@@ -225,3 +225,172 @@ em { font-style: normal; background: #f8f3e9; color: #93630e; border-radius: 999
   .sliderNav.next { right: 10px; }
   .sliderDots { right: 14px; bottom: 14px; }
 }
+
+/* Updated photo slider: larger, faster, clickable, animated */
+.noScroll { overflow: hidden; }
+.trainerShowcase { margin-top: clamp(20px, 4vw, 34px); gap: 18px; }
+.trainerMiniCard { animation: floatIn .55s ease both; }
+.photoSlider.premium {
+  min-height: clamp(440px, 48vw, 620px);
+  border-radius: 34px;
+  border: 1px solid rgba(242,184,75,.28);
+  background: radial-gradient(circle at 30% 0%, rgba(242,184,75,.16), transparent 36%), rgba(255,255,255,.05);
+  box-shadow: 0 30px 90px rgba(0,0,0,.36), inset 0 1px 0 rgba(255,255,255,.12);
+  isolation: isolate;
+}
+.photoSlider.premium::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  z-index: 0;
+  background: linear-gradient(115deg, transparent 0%, rgba(242,184,75,.22) 34%, transparent 52%, rgba(255,255,255,.12) 70%, transparent 100%);
+  transform: translateX(-65%);
+  animation: premiumSweep 5.5s ease-in-out infinite;
+  pointer-events: none;
+}
+.photoSliderTapArea {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: zoom-in;
+  display: block;
+}
+.photoSliderTrack { height: 100%; will-change: transform; }
+.photoSlide { height: clamp(440px, 48vw, 620px); }
+.photoSlide img {
+  transform: scale(1.015);
+  transition: transform 7s ease, filter .35s ease;
+  will-change: transform;
+}
+.photoSlider.premium:hover .photoSlide img { filter: saturate(1.12) contrast(1.06); }
+.photoSlider.premium:hover .photoSlide img { transform: scale(1.06); }
+.photoSlide::after {
+  background:
+    linear-gradient(180deg, rgba(0,0,0,.02) 0%, rgba(0,0,0,.12) 38%, rgba(0,0,0,.82) 100%),
+    linear-gradient(90deg, rgba(0,0,0,.28), transparent 48%);
+}
+.photoSlideOverlay {
+  left: clamp(18px, 4vw, 32px);
+  right: clamp(18px, 4vw, 32px);
+  bottom: clamp(18px, 4vw, 32px);
+  gap: 8px;
+  animation: captionUp .55s ease both;
+}
+.photoSlideOverlay strong { font-size: clamp(25px, 4vw, 42px); max-width: 620px; }
+.photoSlideOverlay span { order: -1; color: #f2b84b; font-size: clamp(12px, 1.4vw, 14px); }
+.photoSlideOverlay em {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 4px;
+  padding: 8px 11px;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 999px;
+  background: rgba(255,255,255,.08);
+  color: rgba(255,255,255,.85);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+  backdrop-filter: blur(10px);
+}
+.sliderNav {
+  z-index: 5;
+  width: 46px;
+  height: 46px;
+  background: rgba(11,11,16,.72);
+  box-shadow: 0 12px 30px rgba(0,0,0,.25);
+}
+.sliderDots { z-index: 5; bottom: 28px; right: 28px; }
+.sliderDots button { height: 9px; width: 9px; }
+.sliderDots button.active { width: 30px; }
+.photoLightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  animation: fadeIn .18s ease both;
+}
+.lightboxBackdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(0,0,0,.82);
+  backdrop-filter: blur(14px);
+}
+.lightboxPanel {
+  position: relative;
+  z-index: 2;
+  width: min(980px, 96vw);
+  height: min(86vh, 920px);
+  border-radius: 30px;
+  overflow: hidden;
+  background: #050507;
+  border: 1px solid rgba(242,184,75,.25);
+  box-shadow: 0 40px 120px rgba(0,0,0,.65);
+  animation: scaleIn .22s ease both;
+}
+.lightboxPanel img { width: 100%; height: 100%; object-fit: contain; display: block; background: #050507; }
+.lightboxClose,
+.lightboxArrow {
+  position: absolute;
+  z-index: 4;
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(11,11,16,.74);
+  color: white;
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+  transition: .18s;
+}
+.lightboxClose { top: 14px; right: 14px; width: 44px; height: 44px; border-radius: 999px; font-size: 30px; line-height: 1; }
+.lightboxArrow { top: 50%; transform: translateY(-50%); width: 52px; height: 52px; border-radius: 999px; font-size: 34px; }
+.lightboxArrow.prev { left: 14px; }
+.lightboxArrow.next { right: 14px; }
+.lightboxClose:hover,
+.lightboxArrow:hover { background: #f2b84b; color: #18181b; border-color: #f2b84b; }
+.lightboxCaption {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 18px;
+  z-index: 4;
+  display: grid;
+  gap: 6px;
+  padding: 16px 18px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(11,11,16,.35), rgba(11,11,16,.76));
+  border: 1px solid rgba(255,255,255,.14);
+  backdrop-filter: blur(14px);
+}
+.lightboxCaption span { color: #f2b84b; font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: .6px; }
+.lightboxCaption strong { color: white; font-size: clamp(20px, 3vw, 34px); }
+@keyframes premiumSweep { 0%, 36% { transform: translateX(-70%); opacity: 0; } 48% { opacity: 1; } 76%, 100% { transform: translateX(70%); opacity: 0; } }
+@keyframes captionUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes floatIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes scaleIn { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
+@media (max-width: 900px) {
+  .photoSlider.premium { min-height: 560px; }
+  .photoSlide { height: 560px; }
+}
+@media (max-width: 600px) {
+  .photoSlider.premium { min-height: 520px; border-radius: 26px; }
+  .photoSlide { height: 520px; }
+  .photoSlide img { object-position: center top; }
+  .photoSlideOverlay { left: 16px; right: 16px; bottom: 16px; }
+  .photoSlideOverlay strong { font-size: 27px; }
+  .photoSlideOverlay em { font-size: 11px; padding: 7px 10px; }
+  .sliderNav { width: 40px; height: 40px; font-size: 28px; }
+  .sliderDots { right: 16px; bottom: 16px; }
+  .lightboxPanel { width: 96vw; height: 82vh; border-radius: 24px; }
+  .lightboxArrow { width: 44px; height: 44px; font-size: 30px; }
+  .lightboxCaption { left: 12px; right: 12px; bottom: 12px; padding: 13px 14px; border-radius: 18px; }
+}

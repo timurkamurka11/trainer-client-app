@@ -128,10 +128,14 @@ const TRAINER_SLIDER_PHOTOS = [
   { file: 'Shows3.jpg', title: 'Твой результат — моя задача', subtitle: 'очно в HITFitness или онлайн' }
 ];
 
-function getTrainerPhotoUrl(fileName) {
+function getTrainerPhotoUrl(fileName, options = {}) {
   if (!fileName) return '';
+  const { width, height, quality = 78, resize = 'cover' } = options;
   if (supabase) {
-    const { data } = supabase.storage.from(TRAINER_PHOTO_BUCKET).getPublicUrl(fileName);
+    const transform = width || height ? { width, height, quality, resize } : undefined;
+    const { data } = supabase.storage
+      .from(TRAINER_PHOTO_BUCKET)
+      .getPublicUrl(fileName, transform ? { transform } : undefined);
     return data?.publicUrl || '';
   }
   if (supabaseUrl) {
@@ -630,29 +634,48 @@ function Profile({ trainer, setTrainer }) {
 function TrainerPhotoShowcase() {
   const photos = useMemo(() => TRAINER_SLIDER_PHOTOS.map((photo) => ({
     ...photo,
-    url: getTrainerPhotoUrl(photo.file)
+    url: getTrainerPhotoUrl(photo.file, { width: 980, quality: 74 }),
+    fullUrl: getTrainerPhotoUrl(photo.file, { width: 1500, quality: 82 })
   })).filter((photo) => photo.url), []);
-  const avatarUrl = getTrainerPhotoUrl(TRAINER_AVATAR_FILE);
+  const avatarUrl = getTrainerPhotoUrl(TRAINER_AVATAR_FILE, { width: 240, height: 240, quality: 78 });
   const [active, setActive] = useState(0);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
 
   useEffect(() => {
-    if (photos.length <= 1) return undefined;
+    if (photos.length <= 1 || lightboxOpen) return undefined;
     const timer = setInterval(() => {
       setActive((current) => (current + 1) % photos.length);
-    }, 4500);
+    }, 5200);
     return () => clearInterval(timer);
-  }, [photos.length]);
+  }, [photos.length, lightboxOpen]);
+
+  useEffect(() => {
+    if (!lightboxOpen) return undefined;
+    const onKey = (event) => {
+      if (event.key === 'Escape') setLightboxOpen(false);
+      if (event.key === 'ArrowLeft') move(-1);
+      if (event.key === 'ArrowRight') move(1);
+    };
+    window.addEventListener('keydown', onKey);
+    document.body.classList.add('noScroll');
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.classList.remove('noScroll');
+    };
+  }, [lightboxOpen, photos.length]);
 
   function move(direction) {
     if (!photos.length) return;
     setActive((current) => (current + direction + photos.length) % photos.length);
   }
 
+  const activePhoto = photos[active];
+
   return (
     <div className="trainerShowcase">
       <div className="trainerMiniCard">
         <div className="trainerAvatar">
-          {avatarUrl ? <img src={avatarUrl} alt="Тим — тренер HITFitness" /> : <span>T</span>}
+          {avatarUrl ? <img src={avatarUrl} alt="Тим — тренер HITFitness" loading="eager" decoding="async" /> : <span>T</span>}
         </div>
         <div>
           <b>Тим</b>
@@ -660,20 +683,34 @@ function TrainerPhotoShowcase() {
         </div>
       </div>
 
-      <div className="photoSlider" aria-label="Фото тренера">
+      <div className="photoSlider premium" aria-label="Фото тренера">
         {photos.length ? (
           <>
-            <div className="photoSliderTrack" style={{ transform: `translateX(-${active * 100}%)` }}>
-              {photos.map((photo) => (
-                <div className="photoSlide" key={photo.file}>
-                  <img src={photo.url} alt={photo.title} loading="lazy" />
-                  <div className="photoSlideOverlay">
-                    <strong>{photo.title}</strong>
-                    <span>{photo.subtitle}</span>
+            <button
+              className="photoSliderTapArea"
+              type="button"
+              onClick={() => setLightboxOpen(true)}
+              aria-label="Открыть фото крупно"
+            >
+              <div className="photoSliderTrack" style={{ transform: `translateX(-${active * 100}%)` }}>
+                {photos.map((photo, index) => (
+                  <div className="photoSlide" key={photo.file}>
+                    <img
+                      src={photo.url}
+                      alt={photo.title}
+                      loading={index === 0 ? 'eager' : 'lazy'}
+                      decoding="async"
+                      fetchPriority={index === 0 ? 'high' : 'auto'}
+                    />
+                    <div className="photoSlideOverlay">
+                      <span>{photo.subtitle}</span>
+                      <strong>{photo.title}</strong>
+                      <em>Нажми, чтобы открыть крупно</em>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </button>
             <button className="sliderNav prev" type="button" onClick={() => move(-1)} aria-label="Предыдущее фото">‹</button>
             <button className="sliderNav next" type="button" onClick={() => move(1)} aria-label="Следующее фото">›</button>
             <div className="sliderDots">
@@ -695,9 +732,26 @@ function TrainerPhotoShowcase() {
           </div>
         )}
       </div>
+
+      {lightboxOpen && activePhoto && (
+        <div className="photoLightbox" role="dialog" aria-modal="true" aria-label="Фото тренера">
+          <button className="lightboxBackdrop" type="button" onClick={() => setLightboxOpen(false)} aria-label="Закрыть" />
+          <div className="lightboxPanel">
+            <button className="lightboxClose" type="button" onClick={() => setLightboxOpen(false)} aria-label="Закрыть">×</button>
+            <button className="lightboxArrow prev" type="button" onClick={() => move(-1)} aria-label="Предыдущее фото">‹</button>
+            <img src={activePhoto.fullUrl || activePhoto.url} alt={activePhoto.title} />
+            <button className="lightboxArrow next" type="button" onClick={() => move(1)} aria-label="Следующее фото">›</button>
+            <div className="lightboxCaption">
+              <span>{activePhoto.subtitle}</span>
+              <strong>{activePhoto.title}</strong>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
 
 
 function PublicLanding() {
