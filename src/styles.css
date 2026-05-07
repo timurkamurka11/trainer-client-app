@@ -394,3 +394,129 @@ em { font-style: normal; background: #f8f3e9; color: #93630e; border-radius: 999
   .lightboxArrow { width: 44px; height: 44px; font-size: 30px; }
   .lightboxCaption { left: 12px; right: 12px; bottom: 12px; padding: 13px 14px; border-radius: 18px; }
 }
+
+/* Update: top avatar, motto, chibi hint, delete actions */
+.btn.danger {
+  background: #fff1f2;
+  color: #be123c;
+  border: 1px solid #fecdd3;
+}
+.btn.danger:hover { background: #ffe4e6; }
+.miniDanger {
+  border: 1px solid #fecdd3;
+  background: #fff1f2;
+  color: #be123c;
+  border-radius: 14px;
+  padding: 9px 11px;
+  font-weight: 900;
+  cursor: pointer;
+  transition: .18s ease;
+  width: fit-content;
+}
+.miniDanger:hover { background: #ffe4e6; transform: translateY(-1px); }
+.heroBadgeRow {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.badgeWithAvatar {
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px 8px 8px;
+  min-height: 52px;
+}
+.badgeWithAvatar img,
+.badgeWithAvatar b {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  object-fit: cover;
+  display: grid;
+  place-items: center;
+  background: #0b0b10;
+  color: #f2b84b;
+  border: 2px solid rgba(255,255,255,.55);
+  box-shadow: 0 8px 20px rgba(0,0,0,.25);
+  flex: 0 0 auto;
+}
+.heroMotto {
+  display: inline-flex;
+  align-items: center;
+  min-height: 46px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  color: #18181b;
+  background: linear-gradient(135deg, #f2b84b, #ffd978);
+  font-weight: 1000;
+  letter-spacing: -.2px;
+  box-shadow: 0 12px 34px rgba(242,184,75,.25);
+  animation: softPulse 2.8s ease-in-out infinite;
+}
+.trainerShowcaseHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.chibiTip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(242,184,75,.42);
+  background: linear-gradient(135deg, rgba(255,255,255,.12), rgba(242,184,75,.18));
+  color: white;
+  border-radius: 999px;
+  padding: 8px 14px 8px 8px;
+  cursor: pointer;
+  font-weight: 1000;
+  box-shadow: 0 18px 42px rgba(0,0,0,.32), inset 0 1px 0 rgba(255,255,255,.12);
+  backdrop-filter: blur(14px);
+  transition: .18s ease;
+  animation: chibiFloat 2.6s ease-in-out infinite;
+}
+.chibiTip:hover { transform: translateY(-2px) scale(1.02); border-color: #f2b84b; }
+.chibiTip img {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 18px rgba(0,0,0,.38));
+  margin: -18px 0 -12px -6px;
+}
+.chibiTip span {
+  white-space: nowrap;
+  color: #fff;
+  text-shadow: 0 2px 14px rgba(0,0,0,.5);
+}
+.chibiTip::after {
+  content: '';
+  position: absolute;
+  right: 11px;
+  bottom: -6px;
+  width: 14px;
+  height: 14px;
+  background: rgba(242,184,75,.24);
+  transform: rotate(45deg);
+  border-right: 1px solid rgba(242,184,75,.42);
+  border-bottom: 1px solid rgba(242,184,75,.42);
+}
+@keyframes chibiFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+@keyframes softPulse {
+  0%, 100% { box-shadow: 0 12px 34px rgba(242,184,75,.25); }
+  50% { box-shadow: 0 16px 46px rgba(242,184,75,.42); }
+}
+@media (max-width: 700px) {
+  .heroBadgeRow { align-items: stretch; }
+  .badgeWithAvatar, .heroMotto { width: 100%; justify-content: center; text-align: center; }
+  .trainerShowcaseHeader { align-items: stretch; }
+  .trainerMiniCard, .chibiTip { width: 100%; justify-content: center; }
+  .chibiTip img { width: 64px; height: 64px; }
+}

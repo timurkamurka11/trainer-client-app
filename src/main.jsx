@@ -120,17 +120,28 @@ if (supabaseUrl && supabaseAnonKey) {
 }
 
 
-const TRAINER_AVATAR_FILE = 'Main.jpg';
+const TRAINER_PHOTO_BUCKET = 'trainer-photos';
+const TRAINER_AVATAR_FILE = 'Main.png';
 const TRAINER_SLIDER_PHOTOS = [
   { file: 'Shows.jpg', title: 'Форма начинается с системы', subtitle: 'тренировки без хаоса' },
   { file: 'Shows2.jpg', title: 'Сильнее каждый месяц', subtitle: 'техника, план, прогресс' },
   { file: 'Shows3.jpg', title: 'Твой результат — моя задача', subtitle: 'очно в HITFitness или онлайн' }
 ];
-const LOCAL_PHOTO_VERSION = '2026-05-06-1';
 
-function getTrainerPhotoUrl(fileName) {
+function getTrainerPhotoUrl(fileName, options = {}) {
   if (!fileName) return '';
-  return `/photos/${encodeURIComponent(fileName)}?v=${LOCAL_PHOTO_VERSION}`;
+  const { width, height, quality = 78, resize = 'cover' } = options;
+  if (supabase) {
+    const transform = width || height ? { width, height, quality, resize } : undefined;
+    const { data } = supabase.storage
+      .from(TRAINER_PHOTO_BUCKET)
+      .getPublicUrl(fileName, transform ? { transform } : undefined);
+    return data?.publicUrl || '';
+  }
+  if (supabaseUrl) {
+    return `${supabaseUrl.replace(/\/$/, '')}/storage/v1/object/public/${TRAINER_PHOTO_BUCKET}/${encodeURIComponent(fileName)}`;
+  }
+  return '';
 }
 
 function toISODate(date) {
@@ -367,6 +378,11 @@ function Leads({ leads, setLeads }) {
     setLeads(leads.map((l) => l.id === id ? { ...l, ...patch } : l));
   }
 
+  function deleteLead(id) {
+    if (!window.confirm('Удалить этого лида?')) return;
+    setLeads(leads.filter((l) => l.id !== id));
+  }
+
   return (
     <div className="grid three">
       <Card>
@@ -397,6 +413,7 @@ function Leads({ leads, setLeads }) {
               <div className="leadControls">
                 <Select value={lead.status} onChange={(e) => updateLead(lead.id, { status: e.target.value })}>{statuses.map((s) => <option key={s}>{s}</option>)}</Select>
                 <Input value={lead.followUp} onChange={(e) => updateLead(lead.id, { followUp: e.target.value })} />
+                <Button variant="danger" onClick={() => deleteLead(lead.id)}>Удалить лида</Button>
               </div>
             </div>
           ))}
@@ -468,6 +485,11 @@ function CalendarPage({ bookings, setBookings, leads }) {
     setForm({ client: '', type: 'Очный разбор', date: 'Сегодня', time: '19:00' });
   }
 
+  function deleteBooking(id) {
+    if (!window.confirm('Удалить эту ручную запись из CRM?')) return;
+    setBookings(bookings.filter((b) => b.id !== id));
+  }
+
   async function addCloudSlot() {
     setCloudMessage('');
     if (!supabase) {
@@ -491,6 +513,25 @@ function CalendarPage({ bookings, setBookings, leads }) {
       return;
     }
     setCloudMessage('Слот добавлен. Теперь клиент увидит его на странице записи.');
+    await refreshCloudSlots();
+  }
+
+  async function hideCloudSlot(slot) {
+    if (!slot) return;
+    if (slot.isDemo || !supabase) {
+      setCloudMessage('Это демо-слот. В настоящей базе скрывать слоты можно после подключения Supabase.');
+      return;
+    }
+    if (!window.confirm(`Скрыть слот ${formatHumanDate(slot.date)} ${formatSlotTime(slot)} с клиентской страницы?`)) return;
+    const { error } = await supabase
+      .from('booking_slots')
+      .update({ is_active: false })
+      .eq('id', slot.id);
+    if (error) {
+      setCloudMessage(`Ошибка: ${error.message}`);
+      return;
+    }
+    setCloudMessage('Слот скрыт с клиентской страницы.');
     await refreshCloudSlots();
   }
 
@@ -522,6 +563,7 @@ function CalendarPage({ bookings, setBookings, leads }) {
                 <p>{formatSlotTime(slot)}</p>
                 <strong>{Number(slot.available ?? 0) > 0 ? `Свободно: ${slot.available}` : 'Занято'}</strong>
                 <em>{slot.isDemo ? 'демо' : 'база'}</em>
+                {!slot.isDemo && <button type="button" className="miniDanger" onClick={() => hideCloudSlot(slot)}>Скрыть слот</button>}
               </div>
             ))}
           </div>
@@ -544,7 +586,7 @@ function CalendarPage({ bookings, setBookings, leads }) {
         </Card>
         <Card className="wide">
           <h2>Локальное расписание CRM</h2>
-          <div className="tileGrid">{bookings.map((b) => <div className="tile" key={b.id}><b>{b.client}</b><p>{b.type}</p><strong>{b.date} • {b.time}</strong><em>{b.status}</em></div>)}</div>
+          <div className="tileGrid">{bookings.map((b) => <div className="tile" key={b.id}><b>{b.client}</b><p>{b.type}</p><strong>{b.date} • {b.time}</strong><em>{b.status}</em><button type="button" className="miniDanger" onClick={() => deleteBooking(b.id)}>Удалить запись</button></div>)}</div>
         </Card>
       </div>
     </div>
@@ -623,10 +665,10 @@ function Profile({ trainer, setTrainer }) {
 function TrainerPhotoShowcase() {
   const photos = useMemo(() => TRAINER_SLIDER_PHOTOS.map((photo) => ({
     ...photo,
-    url: getTrainerPhotoUrl(photo.file),
-    fullUrl: getTrainerPhotoUrl(photo.file)
+    url: getTrainerPhotoUrl(photo.file, { width: 980, quality: 74 }),
+    fullUrl: getTrainerPhotoUrl(photo.file, { width: 1500, quality: 82 })
   })).filter((photo) => photo.url), []);
-  const avatarUrl = getTrainerPhotoUrl(TRAINER_AVATAR_FILE);
+  const avatarUrl = getTrainerPhotoUrl(TRAINER_AVATAR_FILE, { width: 240, height: 240, quality: 78 });
   const [active, setActive] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
@@ -662,14 +704,21 @@ function TrainerPhotoShowcase() {
 
   return (
     <div className="trainerShowcase">
-      <div className="trainerMiniCard">
-        <div className="trainerAvatar">
-          {avatarUrl ? <img src={avatarUrl} alt="Тим — тренер HITFitness" loading="eager" decoding="async" /> : <span>T</span>}
+      <div className="trainerShowcaseHeader">
+        <div className="trainerMiniCard">
+          <div className="trainerAvatar">
+            {avatarUrl ? <img src={avatarUrl} alt="Тим — тренер HITFitness" loading="eager" decoding="async" /> : <span>T</span>}
+          </div>
+          <div>
+            <b>Тим</b>
+            <span>персональный тренер • HITFitness</span>
+          </div>
         </div>
-        <div>
-          <b>Тим</b>
-          <span>персональный тренер • HITFitness</span>
-        </div>
+
+        <button className="chibiTip" type="button" onClick={() => setLightboxOpen(true)} aria-label="Нажми на фото">
+          <img src="/chibi-trainer.png" alt="Подсказка: нажми на фото" loading="eager" />
+          <span>Нажми на фото</span>
+        </button>
       </div>
 
       <div className="photoSlider premium" aria-label="Фото тренера">
@@ -717,7 +766,7 @@ function TrainerPhotoShowcase() {
         ) : (
           <div className="photoSliderFallback">
             <b>Фото скоро появятся</b>
-            <span>Фото должны лежать в папке public/photos: Main.jpg, Shows.jpg, Shows2.jpg, Shows3.jpg.</span>
+            <span>Загрузи Main.png, Shows.jpg, Shows2.jpg, Shows3.jpg в Supabase Storage.</span>
           </div>
         )}
       </div>
@@ -758,6 +807,8 @@ function PublicLanding() {
     format: 'Очно в HITFitness',
     comment: ''
   });
+
+  const heroAvatarUrl = getTrainerPhotoUrl(TRAINER_AVATAR_FILE, { width: 120, height: 120, quality: 82 });
 
   async function refreshSlots() {
     setSlotsLoading(true);
@@ -860,7 +911,13 @@ function PublicLanding() {
 
         <div className="publicHero">
           <section className="heroCard">
-            <span className="badge">Бесплатный фитнес-разбор</span>
+            <div className="heroBadgeRow">
+              <span className="badge badgeWithAvatar">
+                {heroAvatarUrl ? <img src={heroAvatarUrl} alt="Тим" /> : <b>T</b>}
+                Бесплатный фитнес-разбор
+              </span>
+              <span className="heroMotto">Начни сегодня — для лучшего завтра.</span>
+            </div>
             <h1>Выберите удобную дату и запишитесь на разбор</h1>
             <p>
               Меня зовут Тим. Я персональный тренер в HITFitness. Помогаю начать с нуля,
