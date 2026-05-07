@@ -245,6 +245,64 @@ async function bookSlot({ slot, form }) {
   return { data, error };
 }
 
+function normalizeLeadStatus(status) {
+  if (!status || status === 'new') return 'Новый лид';
+  if (status === 'cancelled' || status === 'canceled') return 'Отказ';
+  return status;
+}
+
+function mapCloudLead(row) {
+  const slot = row.slot || {};
+  const date = row.slot_date || slot.date || '';
+  const start = row.start_time || slot.start_time || '';
+  const end = row.end_time || slot.end_time || '';
+  const timeText = date ? `${formatHumanDate(date)} ${end ? `${start}–${end}` : start}` : 'без выбранного времени';
+  const contact = row.contact || '';
+  const comment = row.comment || '';
+
+  return {
+    id: row.id,
+    name: row.name || row.client_name || 'Без имени',
+    contact,
+    source: row.source || (date ? 'Страница записи' : 'Ручной лид'),
+    goal: row.goal || '',
+    format: row.format || 'Не выбрал',
+    status: normalizeLeadStatus(row.status),
+    nextStep: row.next_step || (date ? 'Подтвердить запись и написать клиенту' : 'Связаться с клиентом'),
+    followUp: row.follow_up || 'Сегодня',
+    notes: [
+      contact ? `Контакт: ${contact}` : '',
+      `Время: ${timeText}`,
+      comment ? `Комментарий: ${comment}` : ''
+    ].filter(Boolean).join('. '),
+    slotDate: date,
+    slotTime: end ? `${start}–${end}` : start,
+    createdAt: row.created_at || '',
+    isCloud: true
+  };
+}
+
+async function loadAdminLeads() {
+  if (!supabase) return { data: null, error: null };
+
+  const fromView = await supabase
+    .from('admin_leads')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (!fromView.error) {
+    return { data: (fromView.data || []).map(mapCloudLead), error: null };
+  }
+
+  const fallback = await supabase
+    .from('booking_requests')
+    .select('id, client_name, contact, goal, format, comment, status, created_at, slot:booking_slots(date,start_time,end_time)')
+    .order('created_at', { ascending: false });
+
+  if (fallback.error) return { data: [], error: fromView.error || fallback.error };
+  return { data: (fallback.data || []).map(mapCloudLead), error: null };
+}
+
 function Button({ children, variant = 'dark', ...props }) {
   return <button className={`btn ${variant}`} {...props}>{children}</button>;
 }
@@ -364,22 +422,79 @@ function Dashboard({ leads, platforms, outbox, bookings, setTab }) {
   );
 }
 
-function Leads({ leads, setLeads }) {
-  const [form, setForm] = useState({ name: '', source: '', goal: '', format: 'Очно', notes: '' });
+function Leads({ leads, setLeads, cloudMode = false, loading = false, error = '', refreshLeads }) {
+  const [form, setForm] = useState({ name: '', contact: '', source: '', goal: '', format: 'Очно', notes: '' });
   const [q, setQ] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
   const filtered = leads.filter((l) => Object.values(l).join(' ').toLowerCase().includes(q.toLowerCase()));
 
-  function addLead() {
+  async function addLead() {
     if (!form.name.trim()) return;
-    setLeads([{ id: Date.now(), ...form, status: 'Новый лид', nextStep: 'Ответить и уточнить формат', followUp: 'Сегодня' }, ...leads]);
-    setForm({ name: '', source: '', goal: '', format: 'Очно', notes: '' });
+    setBusy(true);
+    setMessage('');
+
+    if (cloudMode && supabase) {
+      const { error: insertError } = await supabase.from('booking_requests').insert({
+        slot_id: null,
+        client_name: form.name.trim(),
+        contact: form.contact.trim() || 'не указан',
+        source: form.source.trim() || 'Ручной лид',
+        goal: form.goal,
+        format: form.format,
+        comment: form.notes,
+        status: 'Новый лид',
+        next_step: 'Ответить и уточнить формат',
+        follow_up: 'Сегодня'
+      });
+
+      if (insertError) {
+        setMessage(`Ошибка: ${insertError.message}. Проверь, что ты запустил новый supabase.sql.`);
+        setBusy(false);
+        return;
+      }
+
+      await refreshLeads?.();
+    } else {
+      setLeads([{ id: Date.now(), ...form, contact: form.contact || '', status: 'Новый лид', nextStep: 'Ответить и уточнить формат', followUp: 'Сегодня' }, ...leads]);
+    }
+
+    setForm({ name: '', contact: '', source: '', goal: '', format: 'Очно', notes: '' });
+    setBusy(false);
   }
-  function updateLead(id, patch) {
+
+  async function updateLead(id, patch) {
+    if (cloudMode && supabase) {
+      const dbPatch = {};
+      if (patch.status !== undefined) dbPatch.status = patch.status;
+      if (patch.followUp !== undefined) dbPatch.follow_up = patch.followUp;
+      if (patch.nextStep !== undefined) dbPatch.next_step = patch.nextStep;
+
+      const { error: updateError } = await supabase.from('booking_requests').update(dbPatch).eq('id', id);
+      if (updateError) {
+        setMessage(`Ошибка обновления: ${updateError.message}`);
+        return;
+      }
+      await refreshLeads?.();
+      return;
+    }
+
     setLeads(leads.map((l) => l.id === id ? { ...l, ...patch } : l));
   }
 
-  function deleteLead(id) {
+  async function deleteLead(id) {
     if (!window.confirm('Удалить этого лида?')) return;
+
+    if (cloudMode && supabase) {
+      const { error: deleteError } = await supabase.from('booking_requests').delete().eq('id', id);
+      if (deleteError) {
+        setMessage(`Ошибка удаления: ${deleteError.message}`);
+        return;
+      }
+      await refreshLeads?.();
+      return;
+    }
+
     setLeads(leads.filter((l) => l.id !== id));
   }
 
@@ -387,32 +502,53 @@ function Leads({ leads, setLeads }) {
     <div className="grid three">
       <Card>
         <h2>Новый лид</h2>
-        <p>Записывай каждого, кто написал «РАЗБОР».</p>
+        <p>{cloudMode ? 'Добавленный вручную лид сохранится в Supabase и будет виден с телефона и компьютера.' : 'Записывай каждого, кто написал «РАЗБОР».'}</p>
         <div className="form">
           <Input placeholder="Имя" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <Input placeholder="Контакт: Telegram / WhatsApp / телефон" value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} />
           <Input placeholder="Источник" value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} />
           <Input placeholder="Цель клиента" value={form.goal} onChange={(e) => setForm({ ...form, goal: e.target.value })} />
           <Select value={form.format} onChange={(e) => setForm({ ...form, format: e.target.value })}>
             <option>Очно</option><option>Онлайн</option><option>Не выбрал</option>
           </Select>
           <Textarea placeholder="Заметки" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-          <Button onClick={addLead}>Добавить</Button>
+          <Button onClick={addLead} disabled={busy}>{busy ? 'Сохраняю...' : 'Добавить'}</Button>
         </div>
+        {cloudMode && <div className="hint">Режим базы: заявки берутся из Supabase, поэтому на телефоне и компьютере будет одно и то же.</div>}
+        {message && <div className="errorNotice">{message}</div>}
       </Card>
       <Card className="wide">
-        <div className="sectionHead"><h2>База лидов</h2><Input placeholder="Поиск" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+        <div className="sectionHead">
+          <div>
+            <h2>База лидов</h2>
+            <p>{cloudMode ? 'Это заявки из Supabase: сайт, календарь и ручные лиды.' : 'Локальная база этого браузера.'}</p>
+          </div>
+          <div className="leadSearchRow">
+            <Input placeholder="Поиск" value={q} onChange={(e) => setQ(e.target.value)} />
+            {cloudMode && <Button variant="light" onClick={() => refreshLeads?.()} disabled={loading}>Обновить</Button>}
+          </div>
+        </div>
+        {error && <div className="errorNotice">{error}</div>}
+        {loading && <div className="loadingSlots">Загружаю заявки из базы...</div>}
+        {!loading && !filtered.length && <div className="emptySlots">Пока заявок нет. Когда клиент заполнит форму на сайте, он появится здесь.</div>}
         <div className="cardsList">
           {filtered.map((lead) => (
             <div className="lead" key={lead.id}>
               <div>
-                <h3>{lead.name}</h3>
+                <div className="leadTitleRow">
+                  <h3>{lead.name}</h3>
+                  {lead.isCloud && <span className="cloudBadge">Supabase</span>}
+                </div>
                 <p>{lead.source} • {lead.format}</p>
+                {lead.contact && <p><b>Контакт:</b> {lead.contact}</p>}
                 <p><b>Цель:</b> {lead.goal || 'не указана'}</p>
+                {lead.slotDate && <p><b>Запись:</b> {formatHumanDate(lead.slotDate)} {lead.slotTime}</p>}
                 <p><b>Шаг:</b> {lead.nextStep}</p>
+                {lead.notes && <p><b>Заметки:</b> {lead.notes}</p>}
               </div>
               <div className="leadControls">
                 <Select value={lead.status} onChange={(e) => updateLead(lead.id, { status: e.target.value })}>{statuses.map((s) => <option key={s}>{s}</option>)}</Select>
-                <Input value={lead.followUp} onChange={(e) => updateLead(lead.id, { followUp: e.target.value })} />
+                <Input value={lead.followUp || ''} onChange={(e) => updateLead(lead.id, { followUp: e.target.value })} />
                 <Button variant="danger" onClick={() => deleteLead(lead.id)}>Удалить лида</Button>
               </div>
             </div>
@@ -1071,13 +1207,36 @@ class ErrorBoundary extends React.Component {
 function App() {
   const [tab, setTab] = useState('dashboard');
   const [trainer, setTrainer] = useStorage('timfit_trainer', defaultTrainer);
-  const [leads, setLeads] = useStorage('timfit_leads', defaultLeads);
+  const [localLeads, setLocalLeads] = useStorage('timfit_leads', defaultLeads);
+  const [cloudLeads, setCloudLeads] = useState([]);
+  const [leadsLoading, setLeadsLoading] = useState(false);
+  const [leadsError, setLeadsError] = useState('');
   const [platforms, setPlatforms] = useStorage('timfit_platforms', defaultPlatforms);
   const [templates, setTemplates] = useStorage('timfit_templates', defaultTemplates);
   const [outbox, setOutbox] = useStorage('timfit_outbox', defaultOutbox);
   const [bookings, setBookings] = useStorage('timfit_bookings', defaultBookings);
 
   const isAdmin = window.location.pathname.startsWith('/admin');
+  const cloudMode = Boolean(supabase);
+  const adminLeads = cloudMode ? cloudLeads : localLeads;
+
+  async function refreshAdminLeads() {
+    if (!cloudMode) return;
+    setLeadsLoading(true);
+    setLeadsError('');
+    const { data, error } = await loadAdminLeads();
+    if (error) {
+      setLeadsError(`Не удалось загрузить заявки из Supabase: ${error.message}. Запусти обновлённый supabase.sql в SQL Editor.`);
+      setCloudLeads([]);
+    } else {
+      setCloudLeads(data || []);
+    }
+    setLeadsLoading(false);
+  }
+
+  useEffect(() => {
+    if (isAdmin && cloudMode) refreshAdminLeads();
+  }, [isAdmin, cloudMode]);
 
   if (!isAdmin) {
     return <PublicLanding />;
@@ -1085,17 +1244,17 @@ function App() {
 
   const view = useMemo(() => {
     switch (tab) {
-      case 'leads': return <Leads leads={leads} setLeads={setLeads} />;
+      case 'leads': return <Leads leads={adminLeads} setLeads={setLocalLeads} cloudMode={cloudMode} loading={leadsLoading} error={leadsError} refreshLeads={refreshAdminLeads} />;
       case 'messages': return <Messages templates={templates} outbox={outbox} setOutbox={setOutbox} />;
-      case 'calendar': return <CalendarPage bookings={bookings} setBookings={setBookings} leads={leads} />;
+      case 'calendar': return <CalendarPage bookings={bookings} setBookings={setBookings} leads={adminLeads} />;
       case 'platforms': return <Platforms platforms={platforms} setPlatforms={setPlatforms} />;
       case 'templates': return <Templates templates={templates} setTemplates={setTemplates} />;
-      case 'client': return <ClientForm setLeads={setLeads} />;
-      case 'analytics': return <Analytics leads={leads} platforms={platforms} outbox={outbox} bookings={bookings} />;
+      case 'client': return <ClientForm setLeads={setLocalLeads} />;
+      case 'analytics': return <Analytics leads={adminLeads} platforms={platforms} outbox={outbox} bookings={bookings} />;
       case 'profile': return <Profile trainer={trainer} setTrainer={setTrainer} />;
-      default: return <Dashboard leads={leads} platforms={platforms} outbox={outbox} bookings={bookings} setTab={setTab} />;
+      default: return <Dashboard leads={adminLeads} platforms={platforms} outbox={outbox} bookings={bookings} setTab={setTab} />;
     }
-  }, [tab, trainer, leads, platforms, templates, outbox, bookings]);
+  }, [tab, trainer, adminLeads, localLeads, platforms, templates, outbox, bookings, cloudMode, leadsLoading, leadsError]);
 
   return (
     <div className="app">
@@ -1104,7 +1263,7 @@ function App() {
         <div className="mobileTabs">{tabs.map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={tab === id ? 'active' : ''}>{label}</button>)}</div>
         <div className="content">
           <Header trainer={trainer} />
-          <div className="notice"><b>Почти автоматизация:</b> приложение готовит тексты, лиды, напоминания и очередь сообщений, но публикацию подтверждает тренер. <a href="/" target="_blank">Открыть страницу клиента</a></div>
+          <div className="notice"><b>База заявок:</b> {cloudMode ? 'админка читает заявки из Supabase, поэтому телефон и компьютер показывают одно и то же.' : 'Supabase не подключен — сейчас лиды сохраняются только в этом браузере.'} <a href="/" target="_blank">Открыть страницу клиента</a></div>
           {view}
         </div>
       </main>
