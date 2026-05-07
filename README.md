@@ -106,3 +106,19 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 - Слайдер: `Shows.jpg`, `Shows2.jpg`, `Shows3.jpg`
 
 Bucket должен быть Public. После загрузки файлов и деплоя на Vercel фото автоматически появятся на клиентской странице.
+
+
+## Фото на сайте
+
+Фото теперь лежат локально в проекте, без Supabase Storage:
+
+```
+public/photos/Main.jpg
+public/photos/Shows.jpg
+public/photos/Shows2.jpg
+public/photos/Shows3.jpg
+```
+
+Чтобы заменить фото, сожми новые изображения до ширины примерно 900–1200 px, назови их такими же именами и замени файлы в `public/photos`. После этого сделай commit и push в GitHub Desktop.
+
+Supabase остаётся нужен для календаря и заявок. Для фотографий Supabase больше не нужен.

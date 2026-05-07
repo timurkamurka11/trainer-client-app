@@ -120,28 +120,17 @@ if (supabaseUrl && supabaseAnonKey) {
 }
 
 
-const TRAINER_PHOTO_BUCKET = 'trainer-photos';
-const TRAINER_AVATAR_FILE = 'Main.png';
+const TRAINER_AVATAR_FILE = 'Main.jpg';
 const TRAINER_SLIDER_PHOTOS = [
   { file: 'Shows.jpg', title: 'Форма начинается с системы', subtitle: 'тренировки без хаоса' },
   { file: 'Shows2.jpg', title: 'Сильнее каждый месяц', subtitle: 'техника, план, прогресс' },
   { file: 'Shows3.jpg', title: 'Твой результат — моя задача', subtitle: 'очно в HITFitness или онлайн' }
 ];
+const LOCAL_PHOTO_VERSION = '2026-05-06-1';
 
-function getTrainerPhotoUrl(fileName, options = {}) {
+function getTrainerPhotoUrl(fileName) {
   if (!fileName) return '';
-  const { width, height, quality = 78, resize = 'cover' } = options;
-  if (supabase) {
-    const transform = width || height ? { width, height, quality, resize } : undefined;
-    const { data } = supabase.storage
-      .from(TRAINER_PHOTO_BUCKET)
-      .getPublicUrl(fileName, transform ? { transform } : undefined);
-    return data?.publicUrl || '';
-  }
-  if (supabaseUrl) {
-    return `${supabaseUrl.replace(/\/$/, '')}/storage/v1/object/public/${TRAINER_PHOTO_BUCKET}/${encodeURIComponent(fileName)}`;
-  }
-  return '';
+  return `/photos/${encodeURIComponent(fileName)}?v=${LOCAL_PHOTO_VERSION}`;
 }
 
 function toISODate(date) {
@@ -634,10 +623,10 @@ function Profile({ trainer, setTrainer }) {
 function TrainerPhotoShowcase() {
   const photos = useMemo(() => TRAINER_SLIDER_PHOTOS.map((photo) => ({
     ...photo,
-    url: getTrainerPhotoUrl(photo.file, { width: 980, quality: 74 }),
-    fullUrl: getTrainerPhotoUrl(photo.file, { width: 1500, quality: 82 })
+    url: getTrainerPhotoUrl(photo.file),
+    fullUrl: getTrainerPhotoUrl(photo.file)
   })).filter((photo) => photo.url), []);
-  const avatarUrl = getTrainerPhotoUrl(TRAINER_AVATAR_FILE, { width: 240, height: 240, quality: 78 });
+  const avatarUrl = getTrainerPhotoUrl(TRAINER_AVATAR_FILE);
   const [active, setActive] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
@@ -728,7 +717,7 @@ function TrainerPhotoShowcase() {
         ) : (
           <div className="photoSliderFallback">
             <b>Фото скоро появятся</b>
-            <span>Загрузи Main.png, Shows.jpg, Shows2.jpg, Shows3.jpg в Supabase Storage.</span>
+            <span>Фото должны лежать в папке public/photos: Main.jpg, Shows.jpg, Shows2.jpg, Shows3.jpg.</span>
           </div>
         )}
       </div>
