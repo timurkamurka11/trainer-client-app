@@ -1,5 +1,5 @@
 -- TimFit: синхронизация вкладки «Клиенты» между устройствами
--- Запусти этот код отдельно в Supabase SQL Editor.
+-- Запусти весь этот код в Supabase SQL Editor.
 
 create table if not exists public.crm_clients (
   id text primary key,

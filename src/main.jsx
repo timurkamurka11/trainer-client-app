@@ -75,20 +75,7 @@ const defaultBookings = [
   { id: 2, client: 'Игорь', type: 'Онлайн-разбор', date: 'Завтра', time: '12:30', status: 'Слот предложен' }
 ];
 
-const defaultClients = [
-  {
-    id: 1,
-    name: 'Пример клиента',
-    contact: '@telegram / телефон',
-    goal: 'Похудеть и подтянуть форму',
-    format: 'Очно',
-    status: 'Активный клиент',
-    packageName: '8 тренировок',
-    sessionsLeft: 8,
-    nextWorkout: 'Не назначено',
-    notes: 'Здесь можно вести клиента после покупки тренировок.'
-  }
-];
+const defaultClients = [];
 
 const statuses = ['Новый лид', 'Ответил', 'Выбрал формат', 'Назначен разбор', 'Прошел разбор', 'Записан на тренировку', 'Купил пакет', 'Думает', 'Отказ', 'Написать позже'];
 const workoutSplits = ['Плечи', 'Грудь + спина', 'Бицепс', 'Грудь + трицепс', 'Ноги', 'Спина'];
@@ -238,72 +225,104 @@ function clientFromDbRow(row) {
   };
 }
 
+
 function useSyncedClients(localClients, setLocalClients) {
   const [remoteClients, setRemoteClients] = useState([]);
   const [loadingClients, setLoadingClients] = useState(Boolean(supabase));
   const [clientsError, setClientsError] = useState('');
+  const [lastClientsSync, setLastClientsSync] = useState('');
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadClients() {
-      if (!supabase) {
-        setLoadingClients(false);
-        return;
-      }
-      setLoadingClients(true);
-      const { data, error } = await supabase
-        .from('crm_clients')
-        .select('*')
-        .order('updated_at', { ascending: false });
-
-      if (cancelled) return;
-
-      if (error) {
-        setClientsError(error.message);
-        setLoadingClients(false);
-        return;
-      }
-
-      const loaded = (data || []).map(clientFromDbRow);
-      if (loaded.length) {
-        setRemoteClients(loaded);
-      } else {
-        const localToImport = (localClients || []).filter((client) => client?.name);
-        if (localToImport.length) {
-          const { error: upsertError } = await supabase
-            .from('crm_clients')
-            .upsert(localToImport.map(clientToDbRow), { onConflict: 'id' });
-          if (!cancelled && upsertError) {
-            setClientsError(upsertError.message);
-          } else if (!cancelled) {
-            setRemoteClients(localToImport.map((client) => ({ ...client, id: String(client.id) })));
-          }
-        }
-      }
+  async function loadClients({ allowLocalImport = false } = {}) {
+    if (!supabase) {
       setLoadingClients(false);
+      return;
     }
 
-    loadClients();
-    return () => { cancelled = true; };
+    setLoadingClients(true);
+    setClientsError('');
+
+    const { data, error } = await supabase
+      .from('crm_clients')
+      .select('*')
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      setClientsError(`Supabase: ${error.message}`);
+      setLoadingClients(false);
+      return;
+    }
+
+    const loaded = (data || []).map(clientFromDbRow);
+    if (loaded.length) {
+      setRemoteClients(loaded);
+    } else if (allowLocalImport) {
+      const localToImport = (localClients || []).filter((client) => client?.name && client.name !== 'Пример клиента');
+      if (localToImport.length) {
+        const rows = localToImport.map(clientToDbRow);
+        const { error: upsertError } = await supabase
+          .from('crm_clients')
+          .upsert(rows, { onConflict: 'id' });
+
+        if (upsertError) {
+          setClientsError(`Импорт локальных клиентов не прошёл: ${upsertError.message}`);
+        } else {
+          setRemoteClients(localToImport.map((client) => ({ ...client, id: String(client.id) })));
+          setLocalClients([]);
+        }
+      } else {
+        setRemoteClients([]);
+      }
+    } else {
+      setRemoteClients([]);
+    }
+
+    setLastClientsSync(new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }));
+    setLoadingClients(false);
+  }
+
+  useEffect(() => {
+    loadClients({ allowLocalImport: true });
+
+    const onFocus = () => loadClients();
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') loadClients();
+    };
+
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   async function persistRemoteClients(nextClients, previousClients) {
     if (!supabase) return;
+
+    setClientsError('');
     const previousIds = new Set((previousClients || []).map((client) => String(client.id)));
     const nextIds = new Set((nextClients || []).map((client) => String(client.id)));
     const deletedIds = [...previousIds].filter((id) => !nextIds.has(id));
 
     if (deletedIds.length) {
       const { error } = await supabase.from('crm_clients').delete().in('id', deletedIds);
-      if (error) setClientsError(error.message);
+      if (error) {
+        setClientsError(`Удаление не синхронизировалось: ${error.message}`);
+        return;
+      }
     }
 
     if (nextClients.length) {
       const rows = nextClients.map(clientToDbRow);
       const { error } = await supabase.from('crm_clients').upsert(rows, { onConflict: 'id' });
-      if (error) setClientsError(error.message);
+      if (error) {
+        setClientsError(`Сохранение не синхронизировалось: ${error.message}`);
+        return;
+      }
     }
+
+    await loadClients();
   }
 
   function setClientsSynced(nextOrUpdater) {
@@ -317,14 +336,16 @@ function useSyncedClients(localClients, setLocalClients) {
 
     const normalized = (next || []).map((client) => ({ ...client, id: String(client.id) }));
     setRemoteClients(normalized);
-    persistRemoteClients(normalized, remoteClients);
+    void persistRemoteClients(normalized, remoteClients);
   }
 
   return {
     clients: supabase ? remoteClients : localClients,
     setClients: setClientsSynced,
     loadingClients,
-    clientsError
+    clientsError,
+    lastClientsSync,
+    refreshClients: () => loadClients()
   };
 }
 
@@ -569,7 +590,7 @@ function Leads({ leads, setLeads }) {
 }
 
 
-function Clients({ clients, setClients, leads, bookings }) {
+function Clients({ clients, setClients, leads, bookings, loadingClients, clientsError, lastClientsSync, refreshClients }) {
   const [q, setQ] = useState('');
   const [form, setForm] = useState({
     name: '',
@@ -743,9 +764,20 @@ function Clients({ clients, setClients, leads, bookings }) {
 
   return (
     <div className="page">
-      {supabase && <div className="notice"><b>Синхронизация:</b> клиенты и тренировки сохраняются в Supabase и должны быть одинаковыми на телефоне и компьютере.</div>}
-      <div className="grid three">
-        <Card>
+      {supabase ? (
+        <div className="notice syncNotice">
+          <div>
+            <b>Синхронизация:</b> {loadingClients ? 'загружаю клиентов из Supabase…' : 'клиенты и тренировки берутся из Supabase.'}
+            {lastClientsSync && <span> Последнее обновление: {lastClientsSync}</span>}
+          </div>
+          <Button variant="light" onClick={refreshClients}>Обновить из базы</Button>
+        </div>
+      ) : (
+        <div className="errorNotice"><b>Supabase не подключён.</b> Клиенты будут храниться только в этом браузере.</div>
+      )}
+      {clientsError && <div className="errorNotice"><b>Ошибка синхронизации клиентов:</b> {clientsError}</div>}
+      <div className="grid three clientsLayout">
+        <Card className="clientCreateCard">
           <h2>Новый клиент</h2>
           <p>Добавляй клиента и сразу записывай первую тренировку: день, сплит и упражнения.</p>
           <div className="form">
@@ -765,7 +797,7 @@ function Clients({ clients, setClients, leads, bookings }) {
             <Input placeholder="Следующая тренировка" value={form.nextWorkout} onChange={(e) => setForm({ ...form, nextWorkout: e.target.value })} />
             <Textarea placeholder="Заметки: ограничения, оплата, прогресс, что обсудили" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
 
-            <div className="workoutBuilder">
+            <div className="workoutBuilder creationWorkoutBuilder">
               <h3>Первая тренировка</h3>
               <label className="fieldLabel">
                 Дата тренировки
@@ -1587,7 +1619,7 @@ function App() {
   const [outbox, setOutbox] = useStorage('timfit_outbox', defaultOutbox);
   const [bookings, setBookings] = useStorage('timfit_bookings', defaultBookings);
   const [localClients, setLocalClients] = useStorage('timfit_clients', defaultClients);
-  const { clients, setClients, loadingClients, clientsError } = useSyncedClients(localClients, setLocalClients);
+  const { clients, setClients, loadingClients, clientsError, lastClientsSync, refreshClients } = useSyncedClients(localClients, setLocalClients);
 
   const isAdmin = window.location.pathname.startsWith('/admin');
 
@@ -1598,7 +1630,7 @@ function App() {
   const view = useMemo(() => {
     switch (tab) {
       case 'leads': return <Leads leads={leads} setLeads={setLeads} />;
-      case 'clients': return <Clients clients={clients} setClients={setClients} leads={leads} bookings={bookings} />;
+      case 'clients': return <Clients clients={clients} setClients={setClients} leads={leads} bookings={bookings} loadingClients={loadingClients} clientsError={clientsError} lastClientsSync={lastClientsSync} refreshClients={refreshClients} />;
       case 'messages': return <Messages templates={templates} outbox={outbox} setOutbox={setOutbox} />;
       case 'calendar': return <CalendarPage bookings={bookings} setBookings={setBookings} leads={leads} />;
       case 'platforms': return <Platforms platforms={platforms} setPlatforms={setPlatforms} />;
