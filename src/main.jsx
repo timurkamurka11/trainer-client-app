@@ -75,7 +75,20 @@ const defaultBookings = [
   { id: 2, client: 'Игорь', type: 'Онлайн-разбор', date: 'Завтра', time: '12:30', status: 'Слот предложен' }
 ];
 
-const defaultClients = [];
+const defaultClients = [
+  {
+    id: 1,
+    name: 'Пример клиента',
+    contact: '@telegram / телефон',
+    goal: 'Похудеть и подтянуть форму',
+    format: 'Очно',
+    status: 'Активный клиент',
+    packageName: '8 тренировок',
+    sessionsLeft: 8,
+    nextWorkout: 'Не назначено',
+    notes: 'Здесь можно вести клиента после покупки тренировок.'
+  }
+];
 
 const statuses = ['Новый лид', 'Ответил', 'Выбрал формат', 'Назначен разбор', 'Прошел разбор', 'Записан на тренировку', 'Купил пакет', 'Думает', 'Отказ', 'Написать позже'];
 const workoutSplits = ['Плечи', 'Грудь + спина', 'Бицепс', 'Грудь + трицепс', 'Ноги', 'Спина'];
@@ -226,103 +239,363 @@ function clientFromDbRow(row) {
 }
 
 
+function makeUuid() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const random = Math.random() * 16 | 0;
+    const value = char === 'x' ? random : (random & 0x3 | 0x8);
+    return value.toString(16);
+  });
+}
+
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''));
+}
+
+function leadFromDbRow(row) {
+  const slotText = row.slot_date
+    ? `Дата: ${formatHumanDate(row.slot_date)}. Время: ${formatSlotTime({ start_time: row.start_time, end_time: row.end_time })}. `
+    : '';
+  return {
+    id: row.id,
+    name: row.name || row.client_name || '',
+    contact: row.contact || '',
+    source: row.source || 'Ручной лид',
+    goal: row.goal || '',
+    format: row.format || 'Не выбрал',
+    status: row.status || 'Новый лид',
+    nextStep: row.next_step || 'Ответить и уточнить формат',
+    followUp: row.follow_up || 'Сегодня',
+    notes: `${slotText}${row.comment || ''}`.trim(),
+    createdAt: row.created_at || ''
+  };
+}
+
+function leadToDbRow(lead) {
+  return {
+    id: isUuid(lead.id) ? String(lead.id) : makeUuid(),
+    slot_id: null,
+    client_name: lead.name || '',
+    contact: lead.contact || '',
+    goal: lead.goal || '',
+    format: lead.format || 'Не выбрал',
+    comment: lead.notes || '',
+    status: lead.status || 'Новый лид',
+    source: lead.source || 'Ручной лид',
+    next_step: lead.nextStep || 'Ответить и уточнить формат',
+    follow_up: lead.followUp || 'Сегодня'
+  };
+}
+
+function useSyncedLeads(localLeads, setLocalLeads) {
+  const [remoteLeads, setRemoteLeads] = useState([]);
+  const [loadingLeads, setLoadingLeads] = useState(Boolean(supabase));
+  const [leadsError, setLeadsError] = useState('');
+
+  async function loadLeads({ importLocalIfEmpty = false } = {}) {
+    if (!supabase) {
+      setLoadingLeads(false);
+      return localLeads;
+    }
+
+    setLoadingLeads(true);
+    const { data, error } = await supabase
+      .from('admin_leads')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      setLeadsError(error.message);
+      setLoadingLeads(false);
+      return [];
+    }
+
+    const loaded = (data || []).map(leadFromDbRow);
+    if (!loaded.length && importLocalIfEmpty && (localLeads || []).length) {
+      const rows = (localLeads || [])
+        .filter((lead) => lead?.name)
+        .map(leadToDbRow);
+      if (rows.length) {
+        const { error: insertError } = await supabase
+          .from('booking_requests')
+          .insert(rows);
+        if (insertError) {
+          setLeadsError(insertError.message);
+        } else {
+          const imported = rows.map((row) => leadFromDbRow({
+            id: row.id,
+            client_name: row.client_name,
+            contact: row.contact,
+            source: row.source,
+            goal: row.goal,
+            format: row.format,
+            comment: row.comment,
+            status: row.status,
+            next_step: row.next_step,
+            follow_up: row.follow_up
+          }));
+          setRemoteLeads(imported);
+          setLoadingLeads(false);
+          return imported;
+        }
+      }
+    }
+
+    setRemoteLeads(loaded);
+    setLoadingLeads(false);
+    return loaded;
+  }
+
+  useEffect(() => {
+    loadLeads({ importLocalIfEmpty: true });
+    const onFocus = () => loadLeads();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
+  async function persistRemoteLeads(nextLeads, previousLeads) {
+    if (!supabase) return;
+    const previousIds = new Set((previousLeads || []).map((lead) => String(lead.id)));
+    const normalized = (nextLeads || []).map((lead) => {
+      const row = leadToDbRow(lead);
+      return { ...lead, id: row.id };
+    });
+    const nextIds = new Set(normalized.map((lead) => String(lead.id)));
+    const deletedIds = [...previousIds].filter((id) => !nextIds.has(id));
+
+    if (deletedIds.length) {
+      const { error } = await supabase
+        .from('booking_requests')
+        .delete()
+        .in('id', deletedIds);
+      if (error) setLeadsError(error.message);
+    }
+
+    if (normalized.length) {
+      const rows = normalized.map(leadToDbRow);
+      const { error } = await supabase
+        .from('booking_requests')
+        .upsert(rows, { onConflict: 'id' });
+      if (error) setLeadsError(error.message);
+    }
+  }
+
+  function setLeadsSynced(nextOrUpdater) {
+    const current = supabase ? remoteLeads : localLeads;
+    const rawNext = typeof nextOrUpdater === 'function' ? nextOrUpdater(current) : nextOrUpdater;
+    const normalized = (rawNext || []).map((lead) => {
+      const row = leadToDbRow(lead);
+      return { ...lead, id: row.id };
+    });
+
+    if (!supabase) {
+      setLocalLeads(normalized);
+      return;
+    }
+
+    setRemoteLeads(normalized);
+    persistRemoteLeads(normalized, remoteLeads);
+  }
+
+  return {
+    leads: supabase ? remoteLeads : localLeads,
+    setLeads: setLeadsSynced,
+    loadingLeads,
+    leadsError,
+    refreshLeads: () => loadLeads()
+  };
+}
+
+const defaultAdminState = {
+  trainer: defaultTrainer,
+  platforms: defaultPlatforms,
+  templates: defaultTemplates,
+  outbox: defaultOutbox,
+  bookings: defaultBookings
+};
+
+function useSyncedAdminState(localState) {
+  const [remoteState, setRemoteState] = useState(defaultAdminState);
+  const [loadingAdminState, setLoadingAdminState] = useState(Boolean(supabase));
+  const [adminStateError, setAdminStateError] = useState('');
+
+  async function loadAdminState({ importLocalIfMissing = false } = {}) {
+    if (!supabase) {
+      setLoadingAdminState(false);
+      return localState;
+    }
+
+    setLoadingAdminState(true);
+    const { data, error } = await supabase
+      .from('admin_app_state')
+      .select('*')
+      .eq('id', 'global')
+      .maybeSingle();
+
+    if (error) {
+      setAdminStateError(error.message);
+      setLoadingAdminState(false);
+      return defaultAdminState;
+    }
+
+    if (!data && importLocalIfMissing) {
+      const next = {
+        trainer: localState.trainer || defaultTrainer,
+        platforms: localState.platforms || defaultPlatforms,
+        templates: localState.templates || defaultTemplates,
+        outbox: localState.outbox || defaultOutbox,
+        bookings: localState.bookings || defaultBookings
+      };
+      const { error: upsertError } = await supabase
+        .from('admin_app_state')
+        .upsert({
+          id: 'global',
+          trainer: next.trainer,
+          platforms: next.platforms,
+          templates: next.templates,
+          outbox: next.outbox,
+          bookings: next.bookings
+        }, { onConflict: 'id' });
+      if (upsertError) {
+        setAdminStateError(upsertError.message);
+      } else {
+        setRemoteState(next);
+      }
+      setLoadingAdminState(false);
+      return next;
+    }
+
+    const loaded = data ? {
+      trainer: data.trainer || defaultTrainer,
+      platforms: data.platforms || [],
+      templates: data.templates || [],
+      outbox: data.outbox || [],
+      bookings: data.bookings || []
+    } : defaultAdminState;
+
+    setRemoteState(loaded);
+    setLoadingAdminState(false);
+    return loaded;
+  }
+
+  useEffect(() => {
+    loadAdminState({ importLocalIfMissing: true });
+    const onFocus = () => loadAdminState();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
+  async function persistAdminState(nextState) {
+    if (!supabase) return;
+    const { error } = await supabase
+      .from('admin_app_state')
+      .upsert({
+        id: 'global',
+        trainer: nextState.trainer,
+        platforms: nextState.platforms,
+        templates: nextState.templates,
+        outbox: nextState.outbox,
+        bookings: nextState.bookings
+      }, { onConflict: 'id' });
+    if (error) setAdminStateError(error.message);
+  }
+
+  function setAdminField(field, nextOrUpdater) {
+    if (!supabase) {
+      localState.setters[field](nextOrUpdater);
+      return;
+    }
+
+    const currentValue = remoteState[field];
+    const nextValue = typeof nextOrUpdater === 'function'
+      ? nextOrUpdater(currentValue)
+      : nextOrUpdater;
+    const nextState = { ...remoteState, [field]: nextValue };
+    setRemoteState(nextState);
+    persistAdminState(nextState);
+  }
+
+  return {
+    state: supabase ? remoteState : {
+      trainer: localState.trainer,
+      platforms: localState.platforms,
+      templates: localState.templates,
+      outbox: localState.outbox,
+      bookings: localState.bookings
+    },
+    setAdminField,
+    loadingAdminState,
+    adminStateError,
+    refreshAdminState: () => loadAdminState()
+  };
+}
+
 function useSyncedClients(localClients, setLocalClients) {
   const [remoteClients, setRemoteClients] = useState([]);
   const [loadingClients, setLoadingClients] = useState(Boolean(supabase));
   const [clientsError, setClientsError] = useState('');
-  const [lastClientsSync, setLastClientsSync] = useState('');
 
-  async function loadClients({ allowLocalImport = false } = {}) {
+  async function loadClients({ importLocalIfEmpty = false } = {}) {
     if (!supabase) {
       setLoadingClients(false);
-      return;
+      return localClients;
     }
 
     setLoadingClients(true);
-    setClientsError('');
-
     const { data, error } = await supabase
       .from('crm_clients')
       .select('*')
       .order('updated_at', { ascending: false });
 
     if (error) {
-      setClientsError(`Supabase: ${error.message}`);
+      setClientsError(error.message);
       setLoadingClients(false);
-      return;
+      return [];
     }
 
     const loaded = (data || []).map(clientFromDbRow);
     if (loaded.length) {
       setRemoteClients(loaded);
-    } else if (allowLocalImport) {
-      const localToImport = (localClients || []).filter((client) => client?.name && client.name !== 'Пример клиента');
+    } else if (importLocalIfEmpty) {
+      const localToImport = (localClients || []).filter((client) => client?.name);
       if (localToImport.length) {
-        const rows = localToImport.map(clientToDbRow);
         const { error: upsertError } = await supabase
           .from('crm_clients')
-          .upsert(rows, { onConflict: 'id' });
-
+          .upsert(localToImport.map(clientToDbRow), { onConflict: 'id' });
         if (upsertError) {
-          setClientsError(`Импорт локальных клиентов не прошёл: ${upsertError.message}`);
+          setClientsError(upsertError.message);
         } else {
           setRemoteClients(localToImport.map((client) => ({ ...client, id: String(client.id) })));
-          setLocalClients([]);
         }
-      } else {
-        setRemoteClients([]);
       }
-    } else {
-      setRemoteClients([]);
     }
-
-    setLastClientsSync(new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }));
     setLoadingClients(false);
+    return loaded;
   }
 
   useEffect(() => {
-    loadClients({ allowLocalImport: true });
-
+    loadClients({ importLocalIfEmpty: true });
     const onFocus = () => loadClients();
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') loadClients();
-    };
-
     window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onVisibility);
-
-    return () => {
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
+    return () => window.removeEventListener('focus', onFocus);
   }, []);
 
   async function persistRemoteClients(nextClients, previousClients) {
     if (!supabase) return;
-
-    setClientsError('');
     const previousIds = new Set((previousClients || []).map((client) => String(client.id)));
     const nextIds = new Set((nextClients || []).map((client) => String(client.id)));
     const deletedIds = [...previousIds].filter((id) => !nextIds.has(id));
 
     if (deletedIds.length) {
       const { error } = await supabase.from('crm_clients').delete().in('id', deletedIds);
-      if (error) {
-        setClientsError(`Удаление не синхронизировалось: ${error.message}`);
-        return;
-      }
+      if (error) setClientsError(error.message);
     }
 
     if (nextClients.length) {
       const rows = nextClients.map(clientToDbRow);
       const { error } = await supabase.from('crm_clients').upsert(rows, { onConflict: 'id' });
-      if (error) {
-        setClientsError(`Сохранение не синхронизировалось: ${error.message}`);
-        return;
-      }
+      if (error) setClientsError(error.message);
     }
-
-    await loadClients();
   }
 
   function setClientsSynced(nextOrUpdater) {
@@ -336,7 +609,7 @@ function useSyncedClients(localClients, setLocalClients) {
 
     const normalized = (next || []).map((client) => ({ ...client, id: String(client.id) }));
     setRemoteClients(normalized);
-    void persistRemoteClients(normalized, remoteClients);
+    persistRemoteClients(normalized, remoteClients);
   }
 
   return {
@@ -344,7 +617,6 @@ function useSyncedClients(localClients, setLocalClients) {
     setClients: setClientsSynced,
     loadingClients,
     clientsError,
-    lastClientsSync,
     refreshClients: () => loadClients()
   };
 }
@@ -531,14 +803,14 @@ function Dashboard({ leads, platforms, outbox, bookings, setTab }) {
 }
 
 function Leads({ leads, setLeads }) {
-  const [form, setForm] = useState({ name: '', source: '', goal: '', format: 'Очно', notes: '' });
+  const [form, setForm] = useState({ name: '', contact: '', source: '', goal: '', format: 'Очно', notes: '' });
   const [q, setQ] = useState('');
   const filtered = leads.filter((l) => Object.values(l).join(' ').toLowerCase().includes(q.toLowerCase()));
 
   function addLead() {
     if (!form.name.trim()) return;
-    setLeads([{ id: Date.now(), ...form, status: 'Новый лид', nextStep: 'Ответить и уточнить формат', followUp: 'Сегодня' }, ...leads]);
-    setForm({ name: '', source: '', goal: '', format: 'Очно', notes: '' });
+    setLeads([{ id: makeUuid(), ...form, status: 'Новый лид', nextStep: 'Ответить и уточнить формат', followUp: 'Сегодня' }, ...leads]);
+    setForm({ name: '', contact: '', source: '', goal: '', format: 'Очно', notes: '' });
   }
   function updateLead(id, patch) {
     setLeads(leads.map((l) => l.id === id ? { ...l, ...patch } : l));
@@ -556,6 +828,7 @@ function Leads({ leads, setLeads }) {
         <p>Записывай каждого, кто написал «РАЗБОР».</p>
         <div className="form">
           <Input placeholder="Имя" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <Input placeholder="Контакт: Telegram / телефон" value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} />
           <Input placeholder="Источник" value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} />
           <Input placeholder="Цель клиента" value={form.goal} onChange={(e) => setForm({ ...form, goal: e.target.value })} />
           <Select value={form.format} onChange={(e) => setForm({ ...form, format: e.target.value })}>
@@ -590,7 +863,7 @@ function Leads({ leads, setLeads }) {
 }
 
 
-function Clients({ clients, setClients, leads, bookings, loadingClients, clientsError, lastClientsSync, refreshClients }) {
+function Clients({ clients, setClients, leads, bookings }) {
   const [q, setQ] = useState('');
   const [form, setForm] = useState({
     name: '',
@@ -764,20 +1037,9 @@ function Clients({ clients, setClients, leads, bookings, loadingClients, clients
 
   return (
     <div className="page">
-      {supabase ? (
-        <div className="notice syncNotice">
-          <div>
-            <b>Синхронизация:</b> {loadingClients ? 'загружаю клиентов из Supabase…' : 'клиенты и тренировки берутся из Supabase.'}
-            {lastClientsSync && <span> Последнее обновление: {lastClientsSync}</span>}
-          </div>
-          <Button variant="light" onClick={refreshClients}>Обновить из базы</Button>
-        </div>
-      ) : (
-        <div className="errorNotice"><b>Supabase не подключён.</b> Клиенты будут храниться только в этом браузере.</div>
-      )}
-      {clientsError && <div className="errorNotice"><b>Ошибка синхронизации клиентов:</b> {clientsError}</div>}
-      <div className="grid three clientsLayout">
-        <Card className="clientCreateCard">
+      {supabase && <div className="notice"><b>Синхронизация:</b> клиенты и тренировки сохраняются в Supabase и должны быть одинаковыми на телефоне и компьютере.</div>}
+      <div className="grid three">
+        <Card>
           <h2>Новый клиент</h2>
           <p>Добавляй клиента и сразу записывай первую тренировку: день, сплит и упражнения.</p>
           <div className="form">
@@ -797,7 +1059,7 @@ function Clients({ clients, setClients, leads, bookings, loadingClients, clients
             <Input placeholder="Следующая тренировка" value={form.nextWorkout} onChange={(e) => setForm({ ...form, nextWorkout: e.target.value })} />
             <Textarea placeholder="Заметки: ограничения, оплата, прогресс, что обсудили" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
 
-            <div className="workoutBuilder creationWorkoutBuilder">
+            <div className="workoutBuilder">
               <h3>Первая тренировка</h3>
               <label className="fieldLabel">
                 Дата тренировки
@@ -1180,7 +1442,7 @@ function ClientForm({ setLeads }) {
   const [form, setForm] = useState({ name: '', contact: '', goal: '', format: 'Очно', experience: '', limits: '' });
   function submit() {
     if (!form.name.trim()) return;
-    setLeads((prev) => [{ id: Date.now(), name: form.name, source: 'Анкета клиента', goal: form.goal, format: form.format, status: 'Новый лид', nextStep: 'Ответить по анкете', followUp: 'Сегодня', notes: `Контакт: ${form.contact}. Опыт: ${form.experience}. Ограничения: ${form.limits}` }, ...prev]);
+    setLeads((prev) => [{ id: makeUuid(), name: form.name, contact: form.contact, source: 'Анкета клиента', goal: form.goal, format: form.format, status: 'Новый лид', nextStep: 'Ответить по анкете', followUp: 'Сегодня', notes: `Опыт: ${form.experience}. Ограничения: ${form.limits}` }, ...prev]);
     setSent(true);
   }
   if (sent) return <Card className="center"><h2>Заявка создана</h2><p>Она появилась в разделе «Лиды».</p><Button onClick={() => setSent(false)}>Создать ещё одну</Button></Card>;
@@ -1413,25 +1675,6 @@ function PublicLanding() {
       return;
     }
 
-    const lead = {
-      id: Date.now(),
-      name: form.name,
-      source: 'Страница записи',
-      goal: form.goal,
-      format: form.format.includes('Очно') ? 'Очно' : form.format.includes('Онлайн') ? 'Онлайн' : 'Не выбрал',
-      status: 'Новый лид',
-      nextStep: 'Подтвердить запись и написать клиенту',
-      followUp: 'Сегодня',
-      notes: `Контакт: ${form.contact}. Дата: ${formatHumanDate(selectedSlot.date)}. Время: ${formatSlotTime(selectedSlot)}. Комментарий: ${form.comment || '—'}`,
-      createdAt: new Date().toLocaleString('ru-RU')
-    };
-
-    try {
-      const saved = JSON.parse(localStorage.getItem('timfit_leads') || '[]');
-      localStorage.setItem('timfit_leads', JSON.stringify([lead, ...saved]));
-      window.dispatchEvent(new Event('storage'));
-    } catch {}
-
     await refreshSlots();
     setSubmitting(false);
     setSent(true);
@@ -1612,14 +1855,65 @@ class ErrorBoundary extends React.Component {
 
 function App() {
   const [tab, setTab] = useState('dashboard');
-  const [trainer, setTrainer] = useStorage('timfit_trainer', defaultTrainer);
-  const [leads, setLeads] = useStorage('timfit_leads', defaultLeads);
-  const [platforms, setPlatforms] = useStorage('timfit_platforms', defaultPlatforms);
-  const [templates, setTemplates] = useStorage('timfit_templates', defaultTemplates);
-  const [outbox, setOutbox] = useStorage('timfit_outbox', defaultOutbox);
-  const [bookings, setBookings] = useStorage('timfit_bookings', defaultBookings);
+
+  const [localTrainer, setLocalTrainer] = useStorage('timfit_trainer', defaultTrainer);
+  const [localLeads, setLocalLeads] = useStorage('timfit_leads', defaultLeads);
+  const [localPlatforms, setLocalPlatforms] = useStorage('timfit_platforms', defaultPlatforms);
+  const [localTemplates, setLocalTemplates] = useStorage('timfit_templates', defaultTemplates);
+  const [localOutbox, setLocalOutbox] = useStorage('timfit_outbox', defaultOutbox);
+  const [localBookings, setLocalBookings] = useStorage('timfit_bookings', defaultBookings);
   const [localClients, setLocalClients] = useStorage('timfit_clients', defaultClients);
-  const { clients, setClients, loadingClients, clientsError, lastClientsSync, refreshClients } = useSyncedClients(localClients, setLocalClients);
+
+  const localAdminState = {
+    trainer: localTrainer,
+    platforms: localPlatforms,
+    templates: localTemplates,
+    outbox: localOutbox,
+    bookings: localBookings,
+    setters: {
+      trainer: setLocalTrainer,
+      platforms: setLocalPlatforms,
+      templates: setLocalTemplates,
+      outbox: setLocalOutbox,
+      bookings: setLocalBookings
+    }
+  };
+
+  const {
+    state: adminState,
+    setAdminField,
+    loadingAdminState,
+    adminStateError,
+    refreshAdminState
+  } = useSyncedAdminState(localAdminState);
+
+  const {
+    leads,
+    setLeads,
+    loadingLeads,
+    leadsError,
+    refreshLeads
+  } = useSyncedLeads(localLeads, setLocalLeads);
+
+  const {
+    clients,
+    setClients,
+    loadingClients,
+    clientsError,
+    refreshClients
+  } = useSyncedClients(localClients, setLocalClients);
+
+  const trainer = adminState.trainer;
+  const platforms = adminState.platforms;
+  const templates = adminState.templates;
+  const outbox = adminState.outbox;
+  const bookings = adminState.bookings;
+
+  const setTrainer = (next) => setAdminField('trainer', next);
+  const setPlatforms = (next) => setAdminField('platforms', next);
+  const setTemplates = (next) => setAdminField('templates', next);
+  const setOutbox = (next) => setAdminField('outbox', next);
+  const setBookings = (next) => setAdminField('bookings', next);
 
   const isAdmin = window.location.pathname.startsWith('/admin');
 
@@ -1630,7 +1924,7 @@ function App() {
   const view = useMemo(() => {
     switch (tab) {
       case 'leads': return <Leads leads={leads} setLeads={setLeads} />;
-      case 'clients': return <Clients clients={clients} setClients={setClients} leads={leads} bookings={bookings} loadingClients={loadingClients} clientsError={clientsError} lastClientsSync={lastClientsSync} refreshClients={refreshClients} />;
+      case 'clients': return <Clients clients={clients} setClients={setClients} leads={leads} bookings={bookings} />;
       case 'messages': return <Messages templates={templates} outbox={outbox} setOutbox={setOutbox} />;
       case 'calendar': return <CalendarPage bookings={bookings} setBookings={setBookings} leads={leads} />;
       case 'platforms': return <Platforms platforms={platforms} setPlatforms={setPlatforms} />;
@@ -1649,7 +1943,19 @@ function App() {
         <div className="mobileTabs">{tabs.map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={tab === id ? 'active' : ''}>{label}</button>)}</div>
         <div className="content">
           <Header trainer={trainer} />
-          <div className="notice"><b>Почти автоматизация:</b> приложение готовит тексты, лиды, напоминания и очередь сообщений, но публикацию подтверждает тренер. <a href="/" target="_blank">Открыть страницу клиента</a></div>
+          <div className="notice">
+            <b>Общая синхронизация:</b> лиды, клиенты, записи, сообщения, площадки, шаблоны и профиль берутся из Supabase.
+            <button className="inlineRefresh" type="button" onClick={() => { refreshAdminState(); refreshLeads(); refreshClients(); }}>Обновить из базы</button>
+            <a href="/" target="_blank">Открыть страницу клиента</a>
+          </div>
+          {(adminStateError || leadsError || clientsError) && (
+            <div className="errorNotice">
+              {adminStateError && <div><b>Ошибка синхронизации админки:</b> {adminStateError}</div>}
+              {leadsError && <div><b>Ошибка синхронизации лидов:</b> {leadsError}</div>}
+              {clientsError && <div><b>Ошибка синхронизации клиентов:</b> {clientsError}</div>}
+            </div>
+          )}
+          {(loadingAdminState || loadingLeads || loadingClients) && <div className="hint">Обновляю данные из базы...</div>}
           {view}
         </div>
       </main>
