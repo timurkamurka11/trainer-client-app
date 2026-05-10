@@ -91,6 +91,10 @@ const defaultClients = [
 ];
 
 const statuses = ['Новый лид', 'Ответил', 'Выбрал формат', 'Назначен разбор', 'Прошел разбор', 'Записан на тренировку', 'Купил пакет', 'Думает', 'Отказ', 'Написать позже'];
+const workoutSplits = ['Плечи', 'Грудь + спина', 'Бицепс', 'Грудь + трицепс', 'Ноги', 'Спина'];
+const blankExercise = () => ({ name: '', sets: '', weight: '' });
+const blankExercises = () => Array.from({ length: 5 }, blankExercise);
+const blankWorkout = () => ({ date: '', split: 'Плечи', exercises: blankExercises() });
 const tabs = [
   ['dashboard', 'Главная'],
   ['leads', 'Лиды'],
@@ -197,6 +201,131 @@ function isEndAfterStart(start, end) {
 function formatSlotTime(slot) {
   if (!slot) return '';
   return slot.end_time ? `${slot.start_time}–${slot.end_time}` : slot.start_time;
+}
+
+
+function clientToDbRow(client) {
+  return {
+    id: String(client.id),
+    name: client.name || '',
+    contact: client.contact || '',
+    goal: client.goal || '',
+    format: client.format || 'Очно',
+    status: client.status || 'Активный клиент',
+    package_name: client.packageName || '',
+    sessions_left: Number(client.sessionsLeft || 0),
+    next_workout: client.nextWorkout || '',
+    notes: client.notes || '',
+    workouts: client.workouts || [],
+    created_at_text: client.createdAt || new Date().toLocaleString('ru-RU')
+  };
+}
+
+function clientFromDbRow(row) {
+  return {
+    id: row.id,
+    name: row.name || '',
+    contact: row.contact || '',
+    goal: row.goal || '',
+    format: row.format || 'Очно',
+    status: row.status || 'Активный клиент',
+    packageName: row.package_name || '',
+    sessionsLeft: Number(row.sessions_left || 0),
+    nextWorkout: row.next_workout || '',
+    notes: row.notes || '',
+    workouts: Array.isArray(row.workouts) ? row.workouts : [],
+    createdAt: row.created_at_text || ''
+  };
+}
+
+function useSyncedClients(localClients, setLocalClients) {
+  const [remoteClients, setRemoteClients] = useState([]);
+  const [loadingClients, setLoadingClients] = useState(Boolean(supabase));
+  const [clientsError, setClientsError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadClients() {
+      if (!supabase) {
+        setLoadingClients(false);
+        return;
+      }
+      setLoadingClients(true);
+      const { data, error } = await supabase
+        .from('crm_clients')
+        .select('*')
+        .order('updated_at', { ascending: false });
+
+      if (cancelled) return;
+
+      if (error) {
+        setClientsError(error.message);
+        setLoadingClients(false);
+        return;
+      }
+
+      const loaded = (data || []).map(clientFromDbRow);
+      if (loaded.length) {
+        setRemoteClients(loaded);
+      } else {
+        const localToImport = (localClients || []).filter((client) => client?.name);
+        if (localToImport.length) {
+          const { error: upsertError } = await supabase
+            .from('crm_clients')
+            .upsert(localToImport.map(clientToDbRow), { onConflict: 'id' });
+          if (!cancelled && upsertError) {
+            setClientsError(upsertError.message);
+          } else if (!cancelled) {
+            setRemoteClients(localToImport.map((client) => ({ ...client, id: String(client.id) })));
+          }
+        }
+      }
+      setLoadingClients(false);
+    }
+
+    loadClients();
+    return () => { cancelled = true; };
+  }, []);
+
+  async function persistRemoteClients(nextClients, previousClients) {
+    if (!supabase) return;
+    const previousIds = new Set((previousClients || []).map((client) => String(client.id)));
+    const nextIds = new Set((nextClients || []).map((client) => String(client.id)));
+    const deletedIds = [...previousIds].filter((id) => !nextIds.has(id));
+
+    if (deletedIds.length) {
+      const { error } = await supabase.from('crm_clients').delete().in('id', deletedIds);
+      if (error) setClientsError(error.message);
+    }
+
+    if (nextClients.length) {
+      const rows = nextClients.map(clientToDbRow);
+      const { error } = await supabase.from('crm_clients').upsert(rows, { onConflict: 'id' });
+      if (error) setClientsError(error.message);
+    }
+  }
+
+  function setClientsSynced(nextOrUpdater) {
+    const current = supabase ? remoteClients : localClients;
+    const next = typeof nextOrUpdater === 'function' ? nextOrUpdater(current) : nextOrUpdater;
+
+    if (!supabase) {
+      setLocalClients(next);
+      return;
+    }
+
+    const normalized = (next || []).map((client) => ({ ...client, id: String(client.id) }));
+    setRemoteClients(normalized);
+    persistRemoteClients(normalized, remoteClients);
+  }
+
+  return {
+    clients: supabase ? remoteClients : localClients,
+    setClients: setClientsSynced,
+    loadingClients,
+    clientsError
+  };
 }
 
 function demoSlots() {
@@ -451,8 +580,11 @@ function Clients({ clients, setClients, leads, bookings }) {
     packageName: '8 тренировок',
     sessionsLeft: 8,
     nextWorkout: '',
-    notes: ''
+    notes: '',
+    firstWorkout: blankWorkout()
   });
+  const [workoutDrafts, setWorkoutDrafts] = useState({});
+  const [openWorkoutClientId, setOpenWorkoutClientId] = useState(null);
 
   const clientStatuses = ['Активный клиент', 'Потенциальный клиент', 'Думает', 'Пауза', 'Завершил', 'Отказ'];
 
@@ -460,13 +592,59 @@ function Clients({ clients, setClients, leads, bookings }) {
     Object.values(client).join(' ').toLowerCase().includes(q.toLowerCase())
   );
 
+  function normalizeWorkout(workout) {
+    return {
+      id: Date.now() + Math.random(),
+      date: workout.date || '',
+      split: workout.split || 'Плечи',
+      exercises: (workout.exercises || [])
+        .map((exercise) => ({
+          name: exercise.name?.trim() || '',
+          sets: exercise.sets?.toString().trim() || '',
+          weight: exercise.weight?.toString().trim() || ''
+        }))
+        .filter((exercise) => exercise.name || exercise.sets || exercise.weight)
+    };
+  }
+
+  function hasWorkoutData(workout) {
+    return Boolean(workout?.date || workout?.split || (workout?.exercises || []).some((exercise) => exercise.name || exercise.sets || exercise.weight));
+  }
+
+  function updateFirstWorkout(patch) {
+    setForm({ ...form, firstWorkout: { ...form.firstWorkout, ...patch } });
+  }
+
+  function updateFirstExercise(index, patch) {
+    const next = form.firstWorkout.exercises.map((exercise, i) => i === index ? { ...exercise, ...patch } : exercise);
+    updateFirstWorkout({ exercises: next });
+  }
+
+  function addFirstExercise() {
+    updateFirstWorkout({ exercises: [...form.firstWorkout.exercises, blankExercise()] });
+  }
+
+  function removeFirstExercise(index) {
+    const next = form.firstWorkout.exercises.filter((_, i) => i !== index);
+    updateFirstWorkout({ exercises: next.length ? next : [blankExercise()] });
+  }
+
   function addClient() {
     if (!form.name.trim()) return;
+    const workouts = hasWorkoutData(form.firstWorkout) ? [normalizeWorkout(form.firstWorkout)] : [];
     setClients([
       {
         id: Date.now(),
-        ...form,
+        name: form.name,
+        contact: form.contact,
+        goal: form.goal,
+        format: form.format,
+        status: form.status,
+        packageName: form.packageName,
         sessionsLeft: Number(form.sessionsLeft || 0),
+        nextWorkout: form.nextWorkout || form.firstWorkout.date || '',
+        notes: form.notes,
+        workouts,
         createdAt: new Date().toLocaleString('ru-RU')
       },
       ...clients
@@ -480,7 +658,8 @@ function Clients({ clients, setClients, leads, bookings }) {
       packageName: '8 тренировок',
       sessionsLeft: 8,
       nextWorkout: '',
-      notes: ''
+      notes: '',
+      firstWorkout: blankWorkout()
     });
   }
 
@@ -509,18 +688,66 @@ function Clients({ clients, setClients, leads, bookings }) {
         sessionsLeft: 0,
         nextWorkout: '',
         notes: `Создан из лида. Следующий шаг: ${lead.nextStep || 'связаться'}`,
+        workouts: [],
         createdAt: new Date().toLocaleString('ru-RU')
       },
       ...clients
     ]);
   }
 
+  function getWorkoutDraft(clientId) {
+    return workoutDrafts[clientId] || blankWorkout();
+  }
+
+  function updateWorkoutDraft(clientId, patch) {
+    const current = getWorkoutDraft(clientId);
+    setWorkoutDrafts({ ...workoutDrafts, [clientId]: { ...current, ...patch } });
+  }
+
+  function updateWorkoutExercise(clientId, index, patch) {
+    const current = getWorkoutDraft(clientId);
+    const exercises = current.exercises.map((exercise, i) => i === index ? { ...exercise, ...patch } : exercise);
+    updateWorkoutDraft(clientId, { exercises });
+  }
+
+  function addWorkoutExercise(clientId) {
+    const current = getWorkoutDraft(clientId);
+    updateWorkoutDraft(clientId, { exercises: [...current.exercises, blankExercise()] });
+  }
+
+  function removeWorkoutExercise(clientId, index) {
+    const current = getWorkoutDraft(clientId);
+    const exercises = current.exercises.filter((_, i) => i !== index);
+    updateWorkoutDraft(clientId, { exercises: exercises.length ? exercises : [blankExercise()] });
+  }
+
+  function addWorkout(clientId) {
+    const draft = getWorkoutDraft(clientId);
+    if (!draft.date.trim()) {
+      window.alert('Выбери дату тренировки.');
+      return;
+    }
+    const workout = normalizeWorkout(draft);
+    updateClient(clientId, {
+      workouts: [workout, ...(clients.find((client) => client.id === clientId)?.workouts || [])],
+      nextWorkout: draft.date
+    });
+    setWorkoutDrafts({ ...workoutDrafts, [clientId]: blankWorkout() });
+  }
+
+  function deleteWorkout(clientId, workoutId) {
+    if (!window.confirm('Удалить эту тренировку?')) return;
+    const client = clients.find((item) => item.id === clientId);
+    updateClient(clientId, { workouts: (client?.workouts || []).filter((workout) => workout.id !== workoutId) });
+  }
+
   return (
     <div className="page">
+      {supabase && <div className="notice"><b>Синхронизация:</b> клиенты и тренировки сохраняются в Supabase и должны быть одинаковыми на телефоне и компьютере.</div>}
       <div className="grid three">
         <Card>
           <h2>Новый клиент</h2>
-          <p>Сюда добавляй людей, которые купили пакет, пришли на тренировку или которых нужно вести отдельно.</p>
+          <p>Добавляй клиента и сразу записывай первую тренировку: день, сплит и упражнения.</p>
           <div className="form">
             <Input placeholder="Имя клиента" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             <Input placeholder="Контакт: Telegram / телефон" value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} />
@@ -537,6 +764,32 @@ function Clients({ clients, setClients, leads, bookings }) {
             <Input type="number" min="0" placeholder="Осталось тренировок" value={form.sessionsLeft} onChange={(e) => setForm({ ...form, sessionsLeft: e.target.value })} />
             <Input placeholder="Следующая тренировка" value={form.nextWorkout} onChange={(e) => setForm({ ...form, nextWorkout: e.target.value })} />
             <Textarea placeholder="Заметки: ограничения, оплата, прогресс, что обсудили" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+
+            <div className="workoutBuilder">
+              <h3>Первая тренировка</h3>
+              <label className="fieldLabel">
+                Дата тренировки
+                <Input type="date" value={form.firstWorkout.date} onChange={(e) => updateFirstWorkout({ date: e.target.value })} />
+              </label>
+              <label className="fieldLabel">
+                Сплит
+                <Select value={form.firstWorkout.split} onChange={(e) => updateFirstWorkout({ split: e.target.value })}>
+                  {workoutSplits.map((split) => <option key={split}>{split}</option>)}
+                </Select>
+              </label>
+              <div className="exerciseList">
+                {form.firstWorkout.exercises.map((exercise, index) => (
+                  <div className="exerciseRow" key={`first-${index}`}>
+                    <Input placeholder={`Упражнение ${index + 1}`} value={exercise.name} onChange={(e) => updateFirstExercise(index, { name: e.target.value })} />
+                    <Input placeholder="Подходы" value={exercise.sets} onChange={(e) => updateFirstExercise(index, { sets: e.target.value })} />
+                    <Input placeholder="Вес, кг" value={exercise.weight} onChange={(e) => updateFirstExercise(index, { weight: e.target.value })} />
+                    <button type="button" className="miniDanger" onClick={() => removeFirstExercise(index)}>×</button>
+                  </div>
+                ))}
+              </div>
+              <Button variant="light" onClick={addFirstExercise}>+ Добавить упражнение</Button>
+            </div>
+
             <Button onClick={addClient}>Добавить клиента</Button>
           </div>
         </Card>
@@ -545,33 +798,100 @@ function Clients({ clients, setClients, leads, bookings }) {
           <div className="sectionHead">
             <div>
               <h2>База клиентов</h2>
-              <p>Ведение, статусы, остаток тренировок, следующая встреча и удаление.</p>
+              <p>Ведение, статусы, остаток тренировок, сплиты и тренировки.</p>
             </div>
             <Input placeholder="Поиск клиента" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
 
           <div className="cardsList">
-            {filtered.length ? filtered.map((client) => (
-              <div className="lead clientCard" key={client.id}>
-                <div>
-                  <h3>{client.name}</h3>
-                  <p>{client.contact || 'контакт не указан'} • {client.format}</p>
-                  <p><b>Цель:</b> {client.goal || 'не указана'}</p>
-                  <p><b>Пакет:</b> {client.packageName || 'не указан'} • <b>Осталось:</b> {client.sessionsLeft ?? 0}</p>
-                  <p><b>Следующая:</b> {client.nextWorkout || 'не назначена'}</p>
-                  {client.notes && <p><b>Заметки:</b> {client.notes}</p>}
+            {filtered.length ? filtered.map((client) => {
+              const draft = getWorkoutDraft(client.id);
+              const latestWorkout = client.workouts?.[0];
+              return (
+                <div className="lead clientCard clientCardExpanded" key={client.id}>
+                  <div className="clientSummary">
+                    <h3>{client.name}</h3>
+                    <p>{client.contact || 'контакт не указан'} • {client.format}</p>
+                    <p><b>Цель:</b> {client.goal || 'не указана'}</p>
+                    <p><b>Пакет:</b> {client.packageName || 'не указан'} • <b>Осталось:</b> {client.sessionsLeft ?? 0}</p>
+                    <p><b>Следующая:</b> {client.nextWorkout || 'не назначена'}</p>
+                    {latestWorkout && <p><b>Последний сплит:</b> {latestWorkout.split} • {latestWorkout.date || 'без даты'}</p>}
+                    {client.notes && <p><b>Заметки:</b> {client.notes}</p>}
+                  </div>
+                  <div className="leadControls">
+                    <Select value={client.status} onChange={(e) => updateClient(client.id, { status: e.target.value })}>
+                      {clientStatuses.map((status) => <option key={status}>{status}</option>)}
+                    </Select>
+                    <Input value={client.packageName || ''} onChange={(e) => updateClient(client.id, { packageName: e.target.value })} />
+                    <Input type="number" min="0" value={client.sessionsLeft ?? 0} onChange={(e) => updateClient(client.id, { sessionsLeft: Number(e.target.value || 0) })} />
+                    <Input value={client.nextWorkout || ''} placeholder="Следующая тренировка" onChange={(e) => updateClient(client.id, { nextWorkout: e.target.value })} />
+                    <Button variant="light" onClick={() => setOpenWorkoutClientId(openWorkoutClientId === client.id ? null : client.id)}>
+                      {openWorkoutClientId === client.id ? 'Скрыть тренировки' : 'Тренировки'}
+                    </Button>
+                    <Button variant="danger" onClick={() => deleteClient(client.id)}>Удалить клиента</Button>
+                  </div>
+
+                  {openWorkoutClientId === client.id && (
+                    <div className="clientWorkouts">
+                      <div className="workoutBuilder compactWorkoutBuilder">
+                        <h3>Добавить тренировку</h3>
+                        <div className="workoutMetaGrid">
+                          <label className="fieldLabel">
+                            Дата
+                            <Input type="date" value={draft.date} onChange={(e) => updateWorkoutDraft(client.id, { date: e.target.value })} />
+                          </label>
+                          <label className="fieldLabel">
+                            Сплит
+                            <Select value={draft.split} onChange={(e) => updateWorkoutDraft(client.id, { split: e.target.value })}>
+                              {workoutSplits.map((split) => <option key={split}>{split}</option>)}
+                            </Select>
+                          </label>
+                        </div>
+                        <div className="exerciseList">
+                          {draft.exercises.map((exercise, index) => (
+                            <div className="exerciseRow" key={`${client.id}-${index}`}>
+                              <Input placeholder={`Упражнение ${index + 1}`} value={exercise.name} onChange={(e) => updateWorkoutExercise(client.id, index, { name: e.target.value })} />
+                              <Input placeholder="Подходы" value={exercise.sets} onChange={(e) => updateWorkoutExercise(client.id, index, { sets: e.target.value })} />
+                              <Input placeholder="Вес, кг" value={exercise.weight} onChange={(e) => updateWorkoutExercise(client.id, index, { weight: e.target.value })} />
+                              <button type="button" className="miniDanger" onClick={() => removeWorkoutExercise(client.id, index)}>×</button>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="buttonRow">
+                          <Button variant="light" onClick={() => addWorkoutExercise(client.id)}>+ Добавить упражнение</Button>
+                          <Button onClick={() => addWorkout(client.id)}>Сохранить тренировку</Button>
+                        </div>
+                      </div>
+
+                      <div className="workoutHistory">
+                        <h3>История тренировок</h3>
+                        {client.workouts?.length ? client.workouts.map((workout) => (
+                          <div className="workoutCard" key={workout.id}>
+                            <div className="workoutCardHead">
+                              <div>
+                                <b>{workout.split}</b>
+                                <p>{workout.date || 'дата не указана'}</p>
+                              </div>
+                              <button type="button" className="miniDanger" onClick={() => deleteWorkout(client.id, workout.id)}>Удалить</button>
+                            </div>
+                            {workout.exercises?.length ? (
+                              <div className="exerciseSummary">
+                                {workout.exercises.map((exercise, index) => (
+                                  <div key={`${workout.id}-summary-${index}`}>
+                                    <b>{exercise.name || `Упражнение ${index + 1}`}</b>
+                                    <span>{exercise.sets || '—'} подх. • {exercise.weight || '—'} кг</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : <p>Упражнения пока не добавлены.</p>}
+                          </div>
+                        )) : <div className="hint">Тренировок пока нет.</div>}
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <div className="leadControls">
-                  <Select value={client.status} onChange={(e) => updateClient(client.id, { status: e.target.value })}>
-                    {clientStatuses.map((status) => <option key={status}>{status}</option>)}
-                  </Select>
-                  <Input value={client.packageName || ''} onChange={(e) => updateClient(client.id, { packageName: e.target.value })} />
-                  <Input type="number" min="0" value={client.sessionsLeft ?? 0} onChange={(e) => updateClient(client.id, { sessionsLeft: Number(e.target.value || 0) })} />
-                  <Input value={client.nextWorkout || ''} placeholder="Следующая тренировка" onChange={(e) => updateClient(client.id, { nextWorkout: e.target.value })} />
-                  <Button variant="danger" onClick={() => deleteClient(client.id)}>Удалить клиента</Button>
-                </div>
-              </div>
-            )) : <div className="hint">Клиентов пока нет. Добавь первого клиента слева.</div>}
+              );
+            }) : <div className="hint">Клиентов пока нет. Добавь первого клиента слева.</div>}
           </div>
         </Card>
       </div>
@@ -1266,7 +1586,8 @@ function App() {
   const [templates, setTemplates] = useStorage('timfit_templates', defaultTemplates);
   const [outbox, setOutbox] = useStorage('timfit_outbox', defaultOutbox);
   const [bookings, setBookings] = useStorage('timfit_bookings', defaultBookings);
-  const [clients, setClients] = useStorage('timfit_clients', defaultClients);
+  const [localClients, setLocalClients] = useStorage('timfit_clients', defaultClients);
+  const { clients, setClients, loadingClients, clientsError } = useSyncedClients(localClients, setLocalClients);
 
   const isAdmin = window.location.pathname.startsWith('/admin');
 
