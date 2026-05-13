@@ -9,7 +9,7 @@ button, input, textarea, select { font: inherit; }
 .app { min-height: 100vh; display: flex; }
 .sidebar { width: 280px; min-height: 100vh; background: #0b0b10; color: white; padding: 22px; position: sticky; top: 0; }
 .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
-.brandIcon { width: 48px; height: 48px; border-radius: 18px; background: #f2b84b; color: #111; display: grid; place-items: center; font-weight: 1000; font-size: 24px; }
+.brandIcon { width: 48px; height: 48px; border-radius: 18px; background: #f2b84b; color: #111; display: grid; place-items: center; font-weight: 1000; font-size: 18px; letter-spacing: -0.5px; }
 .brand b { display: block; font-size: 19px; }
 .brand span { display: block; color: #a1a1aa; font-size: 12px; margin-top: 2px; }
 .sidebar nav { display: grid; gap: 8px; }
@@ -136,7 +136,7 @@ em { font-style: normal; background: #f8f3e9; color: #93630e; border-radius: 999
 @media (max-width: 600px) {
   .publicPage { padding: 10px; }
   .publicTop { align-items: flex-start; margin-bottom: 10px; }
-  .publicBrand .brandIcon { width: 42px; height: 42px; border-radius: 15px; font-size: 20px; }
+  .publicBrand .brandIcon { width: 42px; height: 42px; border-radius: 15px; font-size: 16px; }
   .publicBrand b { font-size: 16px; line-height: 1.2; }
   .publicBrand span { font-size: 12px; line-height: 1.35; max-width: 250px; }
   .publicHero { gap: 12px; }

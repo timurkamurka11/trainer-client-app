@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import './styles.css';
 
 const defaultTrainer = {
-  name: 'Тим',
+  name: 'Архипов Тимур',
   role: 'Персональный тренер',
   club: 'HITFitness',
   location: 'ТРК «Лео Молл», м. Комендантский проспект',
@@ -49,13 +49,13 @@ const defaultTemplates = [
     id: 1,
     title: 'Первое сообщение в чат',
     type: 'Публикация',
-    text: 'Всем привет! Меня зовут Тим, я тренер в HITFitness в ТРК «Лео Молл», рядом с м. Комендантский проспект. Провожу бесплатный фитнес-разбор: цель, ошибки, программа и план на месяц. Можно очно или онлайн. Кому актуально — напишите в личку: «РАЗБОР».'
+    text: 'Всем привет! Меня зовут Архипов Тимур, я тренер в HITFitness в ТРК «Лео Молл», рядом с м. Комендантский проспект. Провожу бесплатный фитнес-разбор: цель, ошибки, программа и план на месяц. Можно очно или онлайн. Кому актуально — напишите в личку: «РАЗБОР».'
   },
   {
     id: 2,
     title: 'Ответ на «РАЗБОР»',
     type: 'Личное сообщение',
-    text: 'Привет! Спасибо, что написал(а) 🙌 Меня зовут Тим, я тренер в HITFitness. Подскажи, тебе удобнее сделать разбор очно в зале или онлайн? Очно можем встретиться в HITFitness в ТРК «Лео Молл», онлайн — в переписке или созвоне.'
+    text: 'Привет! Спасибо, что написал(а) 🙌 Меня зовут Архипов Тимур, я тренер в HITFitness. Подскажи, тебе удобнее сделать разбор очно в зале или онлайн? Очно можем встретиться в HITFitness в ТРК «Лео Молл», онлайн — в переписке или созвоне.'
   },
   {
     id: 3,
@@ -707,7 +707,7 @@ function Sidebar({ tab, setTab }) {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brandIcon">T</div>
+        <div className="brandIcon">АТ</div>
         <div>
           <b>TimFit CRM</b>
           <span>тренер + клиенты</span>
@@ -1511,10 +1511,10 @@ function TrainerPhotoShowcase() {
       <div className="trainerShowcaseHeader">
         <div className="trainerMiniCard">
           <div className="trainerAvatar">
-            {avatarUrl ? <img src={avatarUrl} alt="Тим — тренер HITFitness" loading="eager" decoding="async" /> : <span>T</span>}
+            {avatarUrl ? <img src={avatarUrl} alt="Архипов Тимур — тренер HITFitness" loading="eager" decoding="async" /> : <span>АТ</span>}
           </div>
           <div>
-            <b>Тим</b>
+            <b>Архипов Тимур</b>
             <span>персональный тренер • HITFitness</span>
           </div>
         </div>
@@ -1619,7 +1619,7 @@ function PublicLanding() {
     setSlotsError('');
     const { data, error, isDemo } = await loadAvailableSlots();
     if (error) {
-      setSlotsError('Не удалось загрузить расписание. Попробуйте позже или напишите Тимy напрямую.');
+      setSlotsError('Не удалось загрузить расписание. Попробуйте позже или напишите Тимуру напрямую.');
       setSlots([]);
     } else {
       const normalized = (data || []).map((slot) => ({
@@ -1685,9 +1685,9 @@ function PublicLanding() {
       <div className="publicWrap">
         <div className="publicTop">
           <div className="publicBrand">
-            <div className="brandIcon">T</div>
+            <div className="brandIcon">АТ</div>
             <div>
-              <b>Тим • HITFitness</b>
+              <b>Архипов Тимур • HITFitness</b>
               <span>ТРК «Лео Молл», м. Комендантский проспект</span>
             </div>
           </div>
@@ -1698,14 +1698,14 @@ function PublicLanding() {
           <section className="heroCard">
             <div className="heroBadgeRow">
               <span className="badge badgeWithAvatar">
-                {heroAvatarUrl ? <img src={heroAvatarUrl} alt="Тим" /> : <b>T</b>}
+                {heroAvatarUrl ? <img src={heroAvatarUrl} alt="Архипов Тимур" /> : <b>АТ</b>}
                 Бесплатный фитнес-разбор
               </span>
               <span className="heroMotto">Начни сегодня — для лучшего завтра.</span>
             </div>
             <h1>Выберите удобную дату и запишитесь на разбор</h1>
             <p>
-              Меня зовут Тим. Я персональный тренер в HITFitness. Помогаю начать с нуля,
+              Меня зовут Архипов Тимур. Я персональный тренер в HITFitness. Помогаю начать с нуля,
               похудеть, набрать мышечную массу, поставить технику и собрать понятный план тренировок.
             </p>
             <TrainerPhotoShowcase />
@@ -1722,7 +1722,7 @@ function PublicLanding() {
               <div className="successBox">
                 <div className="successIcon">✓</div>
                 <h2>Заявка отправлена</h2>
-                <p>Тим увидит заявку и напишет, чтобы подтвердить выбранные дату и время.</p>
+                <p>Архипов Тимур увидит заявку и напишет, чтобы подтвердить выбранные дату и время.</p>
                 <Button onClick={() => setSent(false)}>Записаться ещё раз</Button>
               </div>
             ) : (
